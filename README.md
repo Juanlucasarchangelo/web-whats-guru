@@ -198,7 +198,7 @@ No backend (`whats-guru/server/.env`):
 
 ```env
 NODE_ENV=development
-HOST=127.0.0.1
+HOST=0.0.0.0
 PORT=4000
 DATABASE_URL="mysql://converso_app:SENHA_LOCAL@127.0.0.1:3306/converso_local"
 JWT_SECRET="SEGREDO_LONGO_ALEATORIO"
@@ -207,13 +207,150 @@ ALLOW_REGISTRATION=true
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 INTEGRATION_ENCRYPTION_KEY="CHAVE_DE_CRIPTOGRAFIA_EXISTENTE"
 EVOLUTION_ALLOW_LOCAL_HTTP=true
+EVOLUTION_AUTO_WEBHOOK=true
+EVOLUTION_WEBHOOK_PUBLIC_URL=http://host.docker.internal:4000
+EVOLUTION_WEBHOOK_SECRET="SEGREDO_ALEATORIO_EXCLUSIVO_DO_WEBHOOK"
 ```
 
 **Atenção:** exemplos acima contêm marcadores, **não credenciais reais**. Preserve a `INTEGRATION_ENCRYPTION_KEY` que já está em uso: alterá-la pode impedir a leitura das credenciais de integrações existentes. No ambiente local, `EVOLUTION_ALLOW_LOCAL_HTTP=true` foi usado para permitir Evolution em loopback, como `http://127.0.0.1:8080`; confira a versão instalada antes de configurar.
 
 Se a senha MySQL contiver caracteres reservados como `@`, `#`, `:` ou `/`, codifique-os na URL. Jamais inclua credenciais em arquivos versionados no Git. **Não use variáveis `VITE_` para segredos**, pois ficam acessíveis no navegador.
 
-### 5. Preparar o banco de dados
+### 5. Instalar Docker Desktop e Evolution API (Windows)
+
+Este passo é necessário **para usar WhatsApp pela Evolution**; não é necessário para usar apenas o CRM. O MySQL `converso_local` do Whats-Guru **continua instalado no Windows**: não confunda esse banco com o PostgreSQL interno utilizado pela Evolution API v2.
+
+**5.1. Docker Desktop**
+
+1. Instale o [Docker Desktop para Windows](https://docs.docker.com/desktop/setup/install/windows-install/) e habilite WSL 2, caso solicitado.
+2. Inicie o Docker Desktop e aguarde o mecanismo de contêineres ficar ativo.
+3. No PowerShell, confirme:
+
+```powershell
+docker --version
+docker compose version
+docker info
+```
+
+**5.2. Criar a configuração da Evolution**
+
+Na raiz do projeto, crie a pasta `evolution-local`. Dentro dela, crie um arquivo `compose.yaml` com o conteúdo abaixo. **Se você já tem uma Evolution funcionando, NÃO recrie os contêineres nem volumes**: utilize esta seção apenas como referência para uma instalação nova.
+
+```yaml
+services:
+  evolution:
+    image: atendai/evolution-api:v2.2.3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: "8080"
+      SERVER_URL: http://localhost:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD}@postgres:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_local
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+    volumes:
+      - evolution_instances:/evolution/instances
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD}
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - evolution_redis:/data
+
+volumes:
+  evolution_instances:
+  evolution_postgres:
+  evolution_redis:
+```
+
+> Este é um **exemplo de instalação nova para Evolution API v2**, não uma cópia verificada do contêiner original. A imagem, variáveis e requisitos podem variar conforme a versão da Evolution. Se a tag não estiver disponível ou a versão usada pelo projeto for diferente, confira a [documentação da Evolution](https://doc.evolution-api.com/) antes de trocar a versão; **não atualize uma instalação com dados sem backup**.
+
+Na mesma pasta, crie um arquivo `.env` (não versionar):
+
+```env
+EVOLUTION_API_KEY=COLOQUE_UMA_CHAVE_LONGA_ALEATORIA
+EVOLUTION_DB_PASSWORD=COLOQUE_UMA_SENHA_FORTE_SEM_CARACTERES_RESERVADOS_NA_URL
+```
+
+Para gerar a chave com Node.js, use:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Para iniciar, no PowerShell:
+
+```powershell
+cd evolution-local
+docker compose up -d
+docker compose ps
+docker compose logs --tail=80 evolution
+```
+
+Para verificar se responde, abra `http://localhost:8080` ou execute:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/instance/fetchInstances" -Headers @{apikey="SUA_CHAVE_EVOLUTION"}
+```
+
+Para parar sem excluir os dados: `docker compose stop`. Para voltar: `docker compose start`. **Não execute `docker compose down -v`**, pois a opção `-v` remove volumes e pode apagar sessões e dados da Evolution.
+
+**5.3. Conectar ao Whats-Guru**
+
+1. No `server/.env`, mantenha `EVOLUTION_ALLOW_LOCAL_HTTP=true` apenas para desenvolvimento local.
+2. Use `HOST=0.0.0.0` para que o backend na porta 4000 seja acessível pelo Docker Desktop. Restrinja o acesso a essa porta pelo firewall do Windows; **não exponha a API na internet sem autenticação e HTTPS**.
+3. Configure `EVOLUTION_WEBHOOK_PUBLIC_URL=http://host.docker.internal:4000` — este é o endereço pelo qual o **contêiner** alcança o backend no **Windows**. **Não use `localhost:8080` como URL do webhook**: essa porta é da própria Evolution.
+4. Gere um segredo independente para `EVOLUTION_WEBHOOK_SECRET`, reinicie o backend e, em **Integrações**, cadastre ou vincule a instância com URL `http://localhost:8080`, nome da instância e API Key.
+5. Faça o pareamento pelo QR Code. Verifique o estado `open` e ative/verifique o webhook na interface.
+6. Envie uma mensagem pelo Whats-Guru e responda por outro celular. Confirme a entrada na Caixa de Entrada.
+
+**Vários números:** cada número precisa de uma instância própria na Evolution. Cadastre as instâncias separadamente em **Integrações**; a **Caixa de Entrada** filtra por número, enquanto **Equipe & Permissões** controla quais times podem acessar cada um.
+
+**Diagnóstico rápido:**
+
+```powershell
+# Contêineres ativos
+docker compose ps
+# Eventos e erros da Evolution
+docker compose logs --tail=100 evolution
+# Estado de uma instância (substitua nome e chave)
+Invoke-RestMethod -Uri "http://localhost:8080/instance/connectionState/whats-guru" -Headers @{apikey="SUA_CHAVE_EVOLUTION"}
+# Webhook cadastrado (não compartilhe a URL inteira: contém um segredo)
+Invoke-RestMethod -Uri "http://localhost:8080/webhook/find/whats-guru" -Headers @{apikey="SUA_CHAVE_EVOLUTION"}
+```
+
+Os comandos `docker compose` devem ser executados dentro da pasta `evolution-local`. Se o webhook estiver ativo, mas a URL apontar para `localhost:8080/api/webhooks/...`, corrija `EVOLUTION_WEBHOOK_PUBLIC_URL`, reinicie o backend e registre novamente o webhook. Para instalar em outra máquina, use **novas chaves e senhas**; não copie o `.env` nem o banco de uma instalação em uso.
+
+---
+
+### 6. Preparar o banco de dados
 
 O banco utilizado é **MySQL**, **não Supabase**.
 
@@ -234,7 +371,7 @@ OK: conexao MySQL e estrutura base presentes.
 
 Para uma instalação nova, utilize o script SQL da Etapa 2 da migração e configure um usuário MySQL com permissões apenas no banco da aplicação. **Não execute novamente scripts de criação sem revisar o estado do banco e efetuar backup.** `prisma generate` cria o cliente JavaScript; não cria sozinho as tabelas.
 
-### 6. Iniciar o projeto
+### 7. Iniciar o projeto
 
 Abra **dois terminais**.
 
@@ -271,7 +408,7 @@ npm run build
 npm test
 ```
 
-### 7. Acesso inicial
+### 8. Acesso inicial
 
 O projeto utiliza **cadastro e login próprios**, por e-mail e senha, com autenticação JWT. O cadastro depende da configuração `ALLOW_REGISTRATION`.
 
