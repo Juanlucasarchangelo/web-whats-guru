@@ -11,6 +11,7 @@ import { localDataRouter } from './routes/local-data.js';
 import { teamRouter } from './routes/team.js';
 import { restoredIntegrationsRouter } from './routes/integrations-restore.js';
 import { errorHandler, wrap } from './http.js';
+import { evolutionWebhookRouter } from './routes/evolution-webhook.js';
 
 export function createApp(config) {
   const app = express();
@@ -37,6 +38,7 @@ export function createApp(config) {
     }
   }));
 
+  app.use('/api/webhooks/evolution', evolutionWebhookRouter());
   app.use('/api/auth', authRouter(config, authLimiter));
   app.use('/api', authenticate(config), withOrganization, (() => {
     const secure = express.Router();

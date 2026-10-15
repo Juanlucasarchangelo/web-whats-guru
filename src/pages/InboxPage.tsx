@@ -10,22 +10,19 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { toastSuccess, toastError } from '@/components/ui/Toast';
 import type { Conversation, Message, Tag, QuickReply, InternalNote, Contact } from '@/types';
 import {
-  Search, Filter, Send, Paperclip, Bot, User, Plus, Users as UsersIcon,
+  Search, Filter, Send, Paperclip, Bot, User, Plus, Users as UsersIcon, RefreshCw,
   Tag as TagIcon, StickyNote, Zap, CheckCheck, Check, Circle,
   Inbox as InboxIcon, X, MoreVertical, UserCheck, Archive, MessageCircle,
 } from 'lucide-react';
-
 interface OrgMemberInfo {
   user_id: string;
   role: string;
   profile?: { full_name: string } | null;
 }
-
 export function InboxPage() {
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const orgId = currentOrg?.id;
-
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [availableContacts, setAvailableContacts] = useState<Contact[]>([]);
@@ -46,6 +43,11 @@ export function InboxPage() {
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [messageInput, setMessageInput] = useState('');
   const [suggestingAI, setSuggestingAI] = useState(false);
+  const [whatsAppProvider, setWhatsAppProvider] = useState<'evolution_api' | 'meta' | 'unknown'>('unknown');
+  const [syncing, setSyncing] = useState(false);
+  const [syncInfo, setSyncInfo] = useState<string | null>(null);
+  const [webhookInfo, setWebhookInfo] = useState<string | null>(null);
+  const syncInProgress = useRef(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [showTags, setShowTags] = useState(false);
@@ -53,17 +55,15 @@ export function InboxPage() {
   const [noteInput, setNoteInput] = useState('');
   const [showConfirmClose, setShowConfirmClose] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (silent = false) => {
     if (!orgId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       let query = supabase
         .from('conversations')
         .select('*')
         .eq('org_id', orgId)
         .order('last_message_at', { ascending: false });
-
       if (statusFilter !== 'all') query = query.eq('status', statusFilter);
       if (assigneeFilter === 'me') query = query.eq('assigned_to', user!.id);
       if (assigneeFilter === 'unassigned') query = query.is('assigned_to', null);
@@ -80,12 +80,9 @@ export function InboxPage() {
         }
         query = query.in('id', convIds);
       }
-
       const { data, error } = await query;
       if (error) throw error;
-
       let convList = (data ?? []) as Conversation[];
-
       if (search.trim()) {
         const contactIds = convList.map(c => c.contact_id);
         if (contactIds.length > 0) {
@@ -98,7 +95,6 @@ export function InboxPage() {
           convList = convList.filter(c => matchingIds.has(c.contact_id));
         }
       }
-
       // Load contacts for all conversations
       const allContactIds = convList.map(c => c.contact_id);
       if (allContactIds.length > 0) {
@@ -110,14 +106,31 @@ export function InboxPage() {
         (contactsData ?? []).forEach((c: Contact) => { map[c.id] = c as Contact; });
         setContactsMap(map);
       }
-
       setConversations(convList);
     } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Erro ao carregar conversas');
+      if (silent) console.warn('[Inbox] Falha ao atualizar conversas:', err);
+      else toastError(err instanceof Error ? err.message : 'Erro ao carregar conversas');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [orgId, statusFilter, assigneeFilter, tagFilter, search, user]);
+  // Detecta o provedor da organizacao para mostrar opcoes compatíveis.
+  useEffect(() => {
+    if (!orgId) { setWhatsAppProvider('unknown'); return; }
+    let active = true;
+    apiRequest<{data: Array<{type:string; config?:{provider?:string}}>}>('/integrations')
+      .then(result => {
+        if (!active) return;
+        const configured = result.data?.find(i => i.type === 'whatsapp');
+        const provider = configured?.config?.provider;
+        setWhatsAppProvider(provider === 'evolution_api' ? 'evolution_api' : provider ? 'meta' : 'unknown');
+      })
+      .catch(err => {
+        console.warn('[Inbox] Falha ao consultar provedor WhatsApp:', err);
+        if (active) setWhatsAppProvider('unknown');
+      });
+    return () => { active = false; };
+  }, [orgId]);
 
   // Load tags, quick replies, and members
   useEffect(() => {
@@ -143,14 +156,12 @@ export function InboxPage() {
       }
     });
   }, [orgId]);
-
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
-
   // Load messages when selecting a conversation
-  const loadMessages = useCallback(async (convId: string) => {
-    setLoadingMessages(true);
+  const loadMessages = useCallback(async (convId: string, silent = false) => {
+    if (!silent) setLoadingMessages(true);
     try {
       const { data, error } = await supabase
         .from('messages')
@@ -159,14 +170,12 @@ export function InboxPage() {
         .order('created_at', { ascending: true });
       if (error) throw error;
       setMessages((data ?? []) as Message[]);
-
       // Load conversation tags
       const { data: ctData } = await supabase
         .from('conversation_tags')
         .select('tag:tags(*)')
         .eq('conversation_id', convId);
       setConvTags((ctData ?? []).map((ct: any) => ct.tag) as Tag[]);
-
       // Load notes
       const { data: noteData } = await supabase
         .from('internal_notes')
@@ -174,7 +183,6 @@ export function InboxPage() {
         .eq('conversation_id', convId)
         .order('created_at', { ascending: false });
       setNotes((noteData ?? []) as InternalNote[]);
-
       // Mark as read
       if (selectedConv?.unread_count && selectedConv.unread_count > 0) {
         await supabase
@@ -183,27 +191,93 @@ export function InboxPage() {
           .eq('id', convId);
       }
     } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Erro ao carregar mensagens');
+      if (silent) console.warn('[Inbox] Falha ao atualizar mensagens:', err);
+      else toastError(err instanceof Error ? err.message : 'Erro ao carregar mensagens');
     } finally {
-      setLoadingMessages(false);
+      if (!silent) setLoadingMessages(false);
     }
   }, [selectedConv]);
-
   useEffect(() => {
     if (selectedConv) {
       loadMessages(selectedConv.id);
     }
   }, [selectedConv?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Consulta periodica local. Nao existe assinatura Supabase Realtime.
+  // Atualiza conversas e mensagens pelo MySQL enquanto o webhook e a recuperacao Evolution operam.
   useEffect(() => {
     if (!orgId) return;
     const handle = window.setInterval(() => {
-      void loadConversations();
-      if (selectedConv?.id) void loadMessages(selectedConv.id);
-    }, 10000);
+      void loadConversations(true);
+      if (selectedConv?.id) void loadMessages(selectedConv.id, true);
+    }, 5000);
     return () => window.clearInterval(handle);
   }, [orgId, selectedConv?.id, loadConversations, loadMessages]);
+  // Recover recent messages directly from Evolution if a webhook did not reach the local API.
+  // The backend only imports messages belonging to the selected phone number.
+  const syncFromEvolution = useCallback(async (conversationId: string, showToast = false) => {
+    if (syncInProgress.current) return;
+    syncInProgress.current = true;
+    if (showToast) setSyncing(true);
+    try {
+      const result = await apiRequest<{ok:boolean; counts:Record<string,number>; scanned:number}>(
+        `/conversations/${conversationId}/sync-evolution`, { method: 'POST' },
+      );
+      const received = result.counts?.received ?? 0;
+      const unresolved = result.counts?.ignored_phone_unresolved ?? 0;
+      setSyncInfo(received > 0 ? `${received} nova(s) mensagem(ns) recebida(s)` :
+        unresolved > 0 ? 'Mensagens com identificador sem telefone. Consulte o diagnóstico.' :
+        'Mensagens sincronizadas');
+      await Promise.all([loadMessages(conversationId, true), loadConversations(true)]);
+      if (showToast) toastSuccess(received > 0 ? `${received} mensagem(ns) recuperada(s)` : 'Conversa sincronizada');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao sincronizar Evolution';
+      setSyncInfo(`Falha na sincronização: ${message}`);
+      console.warn('[Inbox] Sincronização Evolution:', message);
+      if (showToast) toastError(message);
+    } finally {
+      syncInProgress.current = false;
+      if (showToast) setSyncing(false);
+    }
+  }, [loadMessages, loadConversations]);
+
+  // Webhook is primary; this bounded per-chat recovery runs only while the chat is open.
+  useEffect(() => {
+    if (whatsAppProvider !== 'evolution_api' || !selectedConv?.id || selectedConv.channel !== 'whatsapp') return;
+    const convId = selectedConv.id;
+    void syncFromEvolution(convId);
+    const handle = window.setInterval(() => void syncFromEvolution(convId), 30000);
+    return () => window.clearInterval(handle);
+  }, [orgId, selectedConv?.id, whatsAppProvider]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function inspectWebhook() {
+    try {
+      const result = await apiRequest<{
+        webhook?: {enabled:boolean;messages_upsert:boolean;has_url:boolean};
+        webhook_error?:string;last_event?:{received_at:string;processed:boolean;error?:string};
+        webhook_configured_in_server:boolean;
+      }>('/integrations/whatsapp/diagnostics');
+      if (result.webhook_error) setWebhookInfo(`Erro ao consultar Evolution: ${result.webhook_error}`);
+      else if (!result.webhook_configured_in_server) setWebhookInfo('Webhook não configurado no server/.env. Use Sincronizar para recuperar mensagens.');
+      else if (!result.webhook?.enabled || !result.webhook.messages_upsert)
+        setWebhookInfo('Webhook não ativo na Evolution. Clique em Ativar recebimento.');
+      else if (result.last_event && !result.last_event.processed)
+        setWebhookInfo('Webhook ativo, mas último evento falhou. Consulte o terminal do backend.');
+      else setWebhookInfo(`Webhook ativo${result.last_event?.received_at ? ` • Último evento: ${new Date(result.last_event.received_at).toLocaleString('pt-BR')}` : ' • Aguardando primeira resposta'}`);
+    } catch (error) {
+      setWebhookInfo(`Diagnóstico indisponível: ${error instanceof Error ? error.message : 'erro inesperado'}`);
+    }
+  }
+
+  async function activateWebhook() {
+    try {
+      await apiRequest('/integrations/whatsapp/reconfigure-webhook', { method: 'POST' });
+      toastSuccess('Registro de webhook solicitado à Evolution');
+      await inspectWebhook();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao ativar webhook';
+      setWebhookInfo(message);
+      toastError(message);
+    }
+  }
 
   async function openNewConversation() {
     try {
@@ -223,14 +297,12 @@ export function InboxPage() {
       setSelectedConv(conversation);
       setCreatingConversation(false);
       await loadConversations();
-      toastSuccess('Conversa local criada');
+      toastSuccess('Conversa criada');
     } catch (err) { toastError(err instanceof Error ? err.message : 'Erro ao criar conversa'); }
   }
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
   async function sendApprovedTemplate() {
     if (!selectedConv || selectedConv.channel !== 'whatsapp') return;
     const name = window.prompt('Nome exato do template aprovado na Meta (ex.: hello_world):', 'hello_world');
@@ -245,7 +317,6 @@ export function InboxPage() {
       toastSuccess('Template aceito pela Meta; entrega ainda nao confirmada');
     } catch(e) {toastError(e instanceof Error?e.message:'Falha ao enviar template');}
   }
-
   async function suggestWithAI() {
     if (!selectedConv || suggestingAI) return;
     setSuggestingAI(true);
@@ -258,26 +329,23 @@ export function InboxPage() {
     } catch(e) { toastError(e instanceof Error?e.message:'Falha na IA'); }
     finally {setSuggestingAI(false);}
   }
-
   async function handleSendMessage() {
     if (!messageInput.trim() || !selectedConv || !orgId || !user) return;
     const body = messageInput.trim();
     setMessageInput('');
     setShowQuickReplies(false);
-
     try {
-      // WhatsApp messages go through the backend and Meta. Local-only writing is not shown as delivered.
+      // WhatsApp messages are sent by the configured provider (Evolution or Meta).
       const data = await apiRequest<Message>(`/conversations/${selectedConv.id}/messages`, {
         method: 'POST', body: JSON.stringify({body, is_internal:false}),
       });
       setMessages(prev => [...prev, data]);
-      if(data.channel === 'whatsapp') toastSuccess('Mensagem aceita pela Meta; entrega ainda nao confirmada');
+      if (selectedConv.channel === 'whatsapp') toastSuccess('Mensagem encaminhada ao provedor; entrega ainda nao confirmada');
     } catch (err) {
       toastError(err instanceof Error ? err.message : 'Erro ao enviar mensagem');
       setMessageInput(body);
     }
   }
-
   async function handleAddNote() {
     if (!noteInput.trim() || !selectedConv || !orgId || !user) return;
     try {
@@ -299,7 +367,6 @@ export function InboxPage() {
       toastError('Erro ao adicionar nota');
     }
   }
-
   async function handleAssign(userId: string | null) {
     if (!selectedConv) return;
     try {
@@ -316,7 +383,6 @@ export function InboxPage() {
       toastError('Erro ao atribuir conversa');
     }
   }
-
   async function handleToggleTag(tagId: string) {
     if (!selectedConv) return;
     const hasTag = convTags.some(t => t.id === tagId);
@@ -339,7 +405,6 @@ export function InboxPage() {
       toastError('Erro ao alterar etiqueta');
     }
   }
-
   async function handleCloseConversation() {
     if (!selectedConv) return;
     try {
@@ -356,7 +421,6 @@ export function InboxPage() {
       toastError('Erro ao encerrar conversa');
     }
   }
-
   async function handleReopenConversation() {
     if (!selectedConv) return;
     try {
@@ -372,27 +436,23 @@ export function InboxPage() {
       toastError('Erro ao reabrir conversa');
     }
   }
-
   function handleQuickReply(qr: QuickReply) {
     setMessageInput(qr.body);
     setShowQuickReplies(false);
   }
-
   const memberName = (userId: string | null) => {
     if (!userId) return null;
     const m = members.find(mem => mem.user_id === userId);
     return m?.profile?.full_name ?? 'Atendente';
   };
-
   const contact = selectedConv ? contactsMap[selectedConv.contact_id] : null;
-
   return (
     <div className="flex h-full">
       {/* Conversations list */}
       <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col">
         {/* Search & filters */}
         <div className="p-4 border-b border-slate-100 space-y-3">
-          <button type="button" className="btn-primary w-full justify-center" onClick={openNewConversation}><Plus size={16}/> Nova conversa local</button>
+          <button type="button" className="btn-primary w-full justify-center" onClick={openNewConversation}><Plus size={16}/> Nova conversa</button>
           {creatingConversation && <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 space-y-2">
             <p className="text-sm font-medium">Selecione um contato</p>
             {availableContacts.length ? <><select className="input w-full" value={newContactId} onChange={e=>setNewContactId(e.target.value)}>
@@ -400,7 +460,16 @@ export function InboxPage() {
             </select><div className="flex gap-2"><button className="btn-primary" onClick={createConversation}>Criar</button><button className="btn-secondary" onClick={()=>setCreatingConversation(false)}>Cancelar</button></div></>
             : <p className="text-sm text-slate-500">Cadastre um contato primeiro na aba Contatos.</p>}
           </div>}
-          <div className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-2">Mensagens são registradas localmente; não são enviadas ao WhatsApp.</div>
+          {whatsAppProvider === 'evolution_api' && (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-600 space-y-2">
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <span>WhatsApp Evolution • Recebimento</span>
+                <button type="button" className="text-blue-700 underline" onClick={inspectWebhook}>Verificar</button>
+                <button type="button" className="text-blue-700 underline" onClick={activateWebhook}>Ativar webhook</button>
+              </div>
+              {webhookInfo && <p role="status" className="break-words">{webhookInfo}</p>}
+            </div>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
@@ -443,7 +512,6 @@ export function InboxPage() {
             )}
           </div>
         </div>
-
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -489,7 +557,6 @@ export function InboxPage() {
           )}
         </div>
       </div>
-
       {/* Chat area */}
       {selectedConv ? (
         <div className="flex-1 flex flex-col bg-slate-50">
@@ -520,6 +587,13 @@ export function InboxPage() {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'evolution_api' && (
+                <button type="button" className="btn-ghost px-2 py-1.5" disabled={syncing}
+                  onClick={() => void syncFromEvolution(selectedConv.id, true)}
+                  title="Sincronizar respostas diretamente da Evolution API">
+                  <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} />
+                </button>
+              )}
               <button onClick={() => setShowAssign(true)} className="btn-ghost px-2 py-1.5" title="Atribuir">
                 <UserCheck size={18} />
               </button>
@@ -540,7 +614,11 @@ export function InboxPage() {
               )}
             </div>
           </div>
-
+          {syncInfo && selectedConv.channel === 'whatsapp' && whatsAppProvider === 'evolution_api' && (
+            <div className={`px-4 py-1 text-xs ${syncInfo.startsWith('Falha') ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-slate-500'}`} role="status">
+              {syncInfo}
+            </div>
+          )}
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {loadingMessages ? (
@@ -578,7 +656,6 @@ export function InboxPage() {
             )}
             <div ref={messagesEndRef} />
           </div>
-
           {/* Message input */}
           {selectedConv.status !== 'closed' && (
             <div className="bg-white border-t border-slate-200 p-3">
@@ -607,9 +684,9 @@ export function InboxPage() {
                   )}
                 </div>
               )}
-              {selectedConv.channel === 'whatsapp' && <p className="text-xs text-amber-700 pb-2">WhatsApp: mensagens livres exigem resposta recebida nas ultimas 24h. Fora disso, use um template aprovado na Meta. “Aceita” nao significa “entregue”.</p>}
+              {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'meta' && <p className="text-xs text-amber-700 pb-2">WhatsApp oficial: mensagens livres exigem janela de atendimento de 24h. Fora dela, utilize template aprovado na Meta. Aceite nao confirma entrega.</p>}
               <div className="flex justify-end gap-2 pb-2">
-                {selectedConv.channel === 'whatsapp' && <button type="button" className="btn-ghost text-xs" onClick={sendApprovedTemplate}>Enviar template aprovado</button>}
+                {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'meta' && <button type="button" className="btn-ghost text-xs" onClick={sendApprovedTemplate}>Enviar template aprovado</button>}
                 <button type="button" className="btn-ghost text-xs" disabled={suggestingAI} onClick={suggestWithAI}><Bot size={14} className="inline mr-1"/>{suggestingAI?'Gerando…':'Sugerir resposta com IA'}</button>
               </div>
               <div className="flex items-end gap-2">
@@ -656,7 +733,6 @@ export function InboxPage() {
           />
         </div>
       )}
-
       {/* Assign modal */}
       <Modal open={showAssign} onClose={() => setShowAssign(false)} title="Atribuir conversa" size="sm">
         <div className="space-y-2">
@@ -688,7 +764,6 @@ export function InboxPage() {
           ))}
         </div>
       </Modal>
-
       {/* Tags modal */}
       <Modal open={showTags} onClose={() => setShowTags(false)} title="Etiquetas da conversa" size="sm">
         {tags.length === 0 ? (
@@ -714,7 +789,6 @@ export function InboxPage() {
           </div>
         )}
       </Modal>
-
       {/* Notes modal */}
       <Modal open={showNotes} onClose={() => setShowNotes(false)} title="Notas internas" size="md">
         <div className="space-y-4">
@@ -746,7 +820,6 @@ export function InboxPage() {
           )}
         </div>
       </Modal>
-
       {/* Close confirmation */}
       <ConfirmDialog
         open={showConfirmClose}
@@ -759,7 +832,6 @@ export function InboxPage() {
     </div>
   );
 }
-
 function MessageBubble() {
   return <MessageCircle size={28} className="text-slate-300" />;
 }

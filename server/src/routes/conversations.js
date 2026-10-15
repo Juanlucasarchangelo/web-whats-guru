@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { sendTextToWhatsApp } from '../services/whatsapp.js';
-import { loadEvolution, sendEvolutionText } from '../services/evolution.js';
+import { loadEvolution, sendEvolutionText, syncEvolutionConversation } from '../services/evolution.js';
 
 const idParam = z.string().uuid();
 const newConversation = z.object({
@@ -51,6 +51,14 @@ export function conversationsRouter() {
     if (!conversation) throw new HttpError(404, 'Conversa nao encontrada.');
     const data = await prisma.message.findMany({ where: { conversation_id: id, org_id: req.orgId }, take: 100, orderBy: { created_at: 'desc' } });
     res.json({ data: data.reverse() });
+  }));
+  router.post('/:id/sync-evolution', wrap(async (req, res) => {
+    const id = idParam.parse(req.params.id);
+    const conversation = await prisma.conversation.findFirst({ where: { id, org_id: req.orgId } });
+    if (!conversation) throw new HttpError(404, 'Conversa nao encontrada.');
+    if (conversation.channel !== 'whatsapp') throw new HttpError(400, 'Sincronizacao Evolution disponivel apenas para WhatsApp.');
+    const result = await syncEvolutionConversation({ orgId: req.orgId, conversation });
+    res.json({ ok: true, ...result });
   }));
   router.post('/:id/messages', wrap(async (req, res) => {
     const id = idParam.parse(req.params.id);
