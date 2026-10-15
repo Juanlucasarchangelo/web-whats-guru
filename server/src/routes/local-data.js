@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { localFields } from './local-fields.js';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
+import { processTagAdded } from '../services/workflow-engine.js';
 
 const MODELS = {
   contacts: ['contact', 'name email phone avatar_url crm_stage crm_value custom_fields last_seen_at'],
@@ -255,6 +256,15 @@ export function localDataRouter() {
       return tx[model].findMany({where, take:100});
     });
     res.json({ data: result });
+    // Manual tagging triggers automations after the DB transaction commits.
+    if (table === 'conversation_tags' && action === 'insert') {
+      for (const link of result) {
+        (async () => {
+          const tag = await prisma.tag.findFirst({ where: { id: link.tag_id, org_id: req.orgId }, select: { name: true } });
+          if (tag) await processTagAdded({ orgId: req.orgId, conversationId: link.conversation_id, tagName: tag.name, tagId: link.tag_id });
+        })().catch(error => console.error('[Workflow] Gatilho de etiqueta falhou:', error.message));
+      }
+    }
   }));
   return router;
 }

@@ -2,6 +2,7 @@ import { getConfig } from './config.js';
 import { prisma } from './db.js';
 import { createApp } from './app.js';
 import { configureEvolutionWebhook } from './services/evolution.js';
+import { workflowTick } from './services/workflow-engine.js';
 
 const config = getConfig();
 const app = createApp(config);
@@ -30,7 +31,13 @@ try {
       }
     }
   });
+  // Runs while the backend is online. Does not need a separate cron service.
+  const workflowTimer = setInterval(() => {
+    workflowTick().catch(error => console.error('[Workflow] Erro no agendador:', error.message));
+  }, 30000);
+  workflowTimer.unref?.();
   async function shutdown() {
+    clearInterval(workflowTimer);
     server.close(async () => { await prisma.$disconnect(); process.exit(0); });
   }
   process.on('SIGINT', shutdown);
