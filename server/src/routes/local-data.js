@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { localFields } from './local-fields.js';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
+import { conversationScope, requireConversation, requireAssigneeForChannel, admin } from '../services/channel-access.js';
 import { processTagAdded } from '../services/workflow-engine.js';
 
 const MODELS = {
@@ -29,7 +30,7 @@ const MODELS = {
   integrations: ['integration', ''],
 };
 const ADMIN_WRITE = new Set(['teams', 'org_members']);
-const NO_WRITE = new Set(['integrations']);
+const NO_WRITE = new Set(['integrations','teams','org_members']);
 const JOINS = {
   conversation_tags: ['conversation_id', 'conversation', 'org_id'],
   contact_tags: ['contact_id', 'contact', 'org_id'],
@@ -60,7 +61,15 @@ function safeFilters(table, items) {
 }
 async function scopedWhere(req, table, filters, tx = prisma) {
   const query = safeFilters(table, filters);
-  if (Object.hasOwn(fields[table], 'org_id')) return { ...query, org_id: req.orgId };
+  if (Object.hasOwn(fields[table], 'org_id')) {
+    if (admin(req)) return { ...query, org_id: req.orgId };
+    if(table==='conversations') return {AND:[{...query,org_id:req.orgId},await conversationScope(req,tx)]};
+    if(table==='messages'||table==='internal_notes') {
+      const ids=(await tx.conversation.findMany({where:await conversationScope(req,tx),select:{id:true}})).map(r=>r.id);
+      return {...query,org_id:req.orgId,conversation_id:{in:ids}};
+    }
+    return {...query,org_id:req.orgId};
+  }
   if (table === 'user_profiles') {
     const memberIds = (await tx.orgMember.findMany({ where: { org_id: req.orgId, status: 'active' }, select: { user_id: true } })).map(m => m.user_id);
     const requested = query.user_id;
@@ -70,7 +79,7 @@ async function scopedWhere(req, table, filters, tx = prisma) {
   if (table === 'org_members') return { ...query, org_id: req.orgId };
   if (table === 'contact_tags' || table === 'conversation_tags' || table === 'campaign_recipients') {
     const [foreign, foreignModel] = JOINS[table];
-    const ids = (await tx[foreignModel].findMany({ where: { org_id: req.orgId }, select: { id: true }, take: 5000 })).map(r => r.id);
+    const ids = (await tx[foreignModel].findMany({ where: table==='conversation_tags'?await conversationScope(req,tx):{ org_id: req.orgId }, select: { id: true }, take: 5000 })).map(r => r.id);
     const requested = query[foreign];
     const authorized = Array.isArray(requested?.in) ? ids.filter(id => requested.in.includes(id)) : requested && typeof requested === 'string' ? ids.filter(id => id === requested) : ids;
     return { ...query, [foreign]: { in: authorized } };
@@ -186,6 +195,7 @@ export function localDataRouter() {
     const { table, action, filters = [], values } = req.body || {};
     const { model } = allowed(table);
     if (!['insert','update','delete'].includes(action)) throw new HttpError(400, 'Acao invalida.');
+    if(table==='conversations' && action==='insert')throw new HttpError(403,'Crie novas conversas pela API de conversas para selecionar o WhatsApp.');
     if (NO_WRITE.has(table)) throw new HttpError(403, 'Operacao nao permitida.');
     if (ADMIN_WRITE.has(table) || (table === 'contacts' && action === 'delete')) admins(req);
     if (table === 'org_members' && action === 'insert') throw new HttpError(403, 'Use a rota /api/team/members para incluir usuarios.');
@@ -204,6 +214,8 @@ export function localDataRouter() {
           const item = cleanWrite(table, raw, 'insert');
           enforce(table, item, 'insert');
           await validateReferences(tx, table, item, req.orgId);
+          if(!admin(req) && item.conversation_id)await requireConversation(req,item.conversation_id,tx);
+          if(!admin(req) && table==='conversation_tags')await requireConversation(req,item.conversation_id,tx);
           if (table === 'messages') {
             // Channel and agent are established server-side; no real WhatsApp sending.
             const conv = await tx.conversation.findFirst({ where: { id: item.conversation_id, org_id: req.orgId } });
@@ -251,6 +263,8 @@ export function localDataRouter() {
       const item = cleanWrite(table, values, 'update');
       enforce(table, item, 'update');
       await validateReferences(tx, table, item, req.orgId);
+      if(table==='conversations' && item.assigned_to){for(const existing of found)await requireAssigneeForChannel(req.orgId,item.assigned_to,existing.integration_id,tx);}
+      if(!admin(req)&&item.conversation_id)await requireConversation(req,item.conversation_id,tx);
       if (table === 'org_members' && !item.role) throw new HttpError(400,'Perfil nao informado.');
       await tx[model].updateMany({ where, data: item });
       return tx[model].findMany({where, take:100});

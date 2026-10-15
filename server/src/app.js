@@ -9,6 +9,7 @@ import { contactsRouter } from './routes/contacts.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { localDataRouter } from './routes/local-data.js';
 import { teamRouter } from './routes/team.js';
+import { channelsRouter } from './routes/channels.js';
 import { restoredIntegrationsRouter } from './routes/integrations-restore.js';
 import { errorHandler, wrap } from './http.js';
 import { evolutionWebhookRouter } from './routes/evolution-webhook.js';
@@ -57,6 +58,7 @@ export function createApp(config) {
     }));
     secure.use('/local', localDataRouter());
     secure.use('/team', teamRouter());
+    secure.use('/channels', channelsRouter());
     secure.use('/integrations', restoredIntegrationsRouter());
     secure.use('/contacts', contactsRouter());
     secure.use('/conversations', conversationsRouter());

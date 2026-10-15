@@ -18,12 +18,12 @@ try {
         console.error('[Evolution Webhook] Configuracao incompleta: verifique EVOLUTION_WEBHOOK_PUBLIC_URL e EVOLUTION_WEBHOOK_SECRET (>=32 caracteres).');
       } else {
         (async()=>{
-          const integrations=await prisma.integration.findMany({where:{type:'whatsapp'},select:{org_id:true,config:true}});
+          const integrations=await prisma.integration.findMany({where:{type:'whatsapp'},select:{id:true,org_id:true,config:true}});
           for (const integration of integrations) {
             if(integration.config?.provider!=='evolution_api')continue;
             try {
               const endpoint=`${publicUrl.replace(/\/$/,'')}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
-              const result=await configureEvolutionWebhook(integration.org_id,endpoint);
+              const result=await configureEvolutionWebhook(integration.org_id,endpoint,integration.id);
               console.info('[Evolution Webhook] Registro automatico:',{instance:result.instance,ok:result.ok});
             }catch(err){console.error('[Evolution Webhook] Falha de registro:',{code:err?.code||'ERROR',message:err?.message});}
           }

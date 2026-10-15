@@ -19,8 +19,10 @@ function decrypt(ciphertext) {
   return Buffer.concat([decipher.update(buf.subarray(28)),decipher.final()]).toString('utf8');
  } catch {throw new HttpError(503,'Falha ao ler chave Evolution. Confira INTEGRATION_ENCRYPTION_KEY original.');}
 }
-export async function loadEvolution(orgId) {
- const integration=await prisma.integration.findFirst({where:{org_id:orgId,type:'whatsapp'}});
+export async function loadEvolution(orgId, integrationId = null) {
+ const integration = integrationId
+   ? await prisma.integration.findFirst({where:{id:integrationId,org_id:orgId,type:'whatsapp'}})
+   : await prisma.integration.findFirst({where:{org_id:orgId,type:'whatsapp'},orderBy:{created_at:'asc'}});
  if(!integration || integration.config?.provider!=='evolution_api') return null;
  const credentials=await prisma.integrationCredential.findFirst({where:{integration_id:integration.id,org_id:orgId}});
  if(!credentials?.access_token)throw new HttpError(503,'API Key Evolution nao foi salva. Configure em Integracoes.');
@@ -42,18 +44,19 @@ async function evolutionGet(api,path,method='GET',body) {
  }
  return data;
 }
-export async function syncEvolutionStatus(orgId) {
- const api=await loadEvolution(orgId); if(!api)return null;
+export async function syncEvolutionStatus(orgId, integrationId = null) {
+ const api=await loadEvolution(orgId, integrationId); if(!api)return null;
  const result=await evolutionGet(api,`/instance/connectionState/${encodeURIComponent(api.instance)}`);
  const state=result?.instance?.state;
  const status=state==='open'?'connected':state==='connecting'?'connecting':'disconnected';
  if(api.integration.status!==status)await prisma.integration.updateMany({where:{id:api.integration.id,org_id:orgId},data:{status,last_connected_at:status==='connected'?new Date():api.integration.last_connected_at}});
- return {status,instance_name:api.instance,provider:'evolution_api'};
+ return {status,instance_name:api.instance,integration_id:api.integration.id,provider:'evolution_api'};
 }
 export async function sendEvolutionText({orgId,conversation,text,userId}) {
- const api=await loadEvolution(orgId);
- if(!api)throw new HttpError(503,'Evolution nao configurada para esta organizacao.');
- const state=await syncEvolutionStatus(orgId);
+ if(!conversation.integration_id)throw new HttpError(409,'Conversa sem numero de WhatsApp vinculado. Execute a atualizacao do banco antes de enviar.');
+ const api=await loadEvolution(orgId,conversation.integration_id);
+ if(!api)throw new HttpError(503,'Evolution nao configurada para esta conversa.');
+ const state=await syncEvolutionStatus(orgId,api.integration.id);
  if(state.status!=='connected')throw new HttpError(409,`Instancia Evolution nao esta conectada (status: ${state.status}).`);
  const contact=await prisma.contact.findFirst({where:{id:conversation.contact_id,org_id:orgId},select:{phone:true}});
  const phone=String(contact?.phone||'').replace(/\D/g,'');
@@ -71,8 +74,8 @@ export async function sendEvolutionText({orgId,conversation,text,userId}) {
 }
 
 /** Evolution API v2 expects FLAT webhook settings, not {webhook:{...}}. */
-export async function configureEvolutionWebhook(orgId, endpointUrl) {
- const api = await loadEvolution(orgId);
+export async function configureEvolutionWebhook(orgId, endpointUrl, integrationId = null) {
+ const api = await loadEvolution(orgId, integrationId);
  if (!api) throw new HttpError(404, 'Evolution nao configurada nesta organizacao.');
  const parsed = new URL(endpointUrl);
  if (!['https:', 'http:'].includes(parsed.protocol)) throw new HttpError(400, 'Webhook deve usar HTTP(S).');
@@ -95,7 +98,7 @@ export async function configureEvolutionWebhook(orgId, endpointUrl) {
  }
  let verified = false;
  try {
-   const status = await getEvolutionWebhookInfo(orgId);
+   const status = await getEvolutionWebhookInfo(orgId, api.integration.id);
    verified = Boolean(status?.enabled && status?.has_url && status?.messages_upsert);
  } catch (error) {
    console.warn('[Evolution Webhook] Registro aceito, mas falhou a verificacao de leitura:', error.message);
@@ -105,8 +108,8 @@ export async function configureEvolutionWebhook(orgId, endpointUrl) {
  return { ok: true, verified, instance: api.instance, contract, events: body.events };
 }
 
-export async function getEvolutionWebhookInfo(orgId) {
- const api = await loadEvolution(orgId);
+export async function getEvolutionWebhookInfo(orgId, integrationId = null) {
+ const api = await loadEvolution(orgId, integrationId);
  if (!api) return null;
  const result = await evolutionGet(api, `/webhook/find/${encodeURIComponent(api.instance)}`);
  const config = result?.webhook?.webhook ?? result?.webhook ?? result?.data?.webhook ?? result?.data ?? result;
@@ -131,8 +134,9 @@ function extractHistoryRecords(result) {
 
 /** Recovery path when Docker cannot deliver webhooks: import the open conversation's recent messages. */
 export async function syncEvolutionConversation({ orgId, conversation }) {
- const api = await loadEvolution(orgId);
- if (!api) throw new HttpError(404, 'Evolution nao configurada.');
+ if(!conversation.integration_id) throw new HttpError(409,'Conversa sem numero vinculado. Execute a atualizacao do banco.');
+ const api = await loadEvolution(orgId, conversation.integration_id);
+ if (!api) throw new HttpError(404, 'Evolution nao configurada para esta conversa.');
  const contact = await prisma.contact.findFirst({
    where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true },
  });
@@ -151,7 +155,7 @@ export async function syncEvolutionConversation({ orgId, conversation }) {
    fallback_used = true;
  }
  const results = [];
- for (const item of items) results.push(await importEvolutionMessage({ orgId, item, expectedPhone: phone }));
+ for (const item of items) results.push(await importEvolutionMessage({ orgId, integrationId: api.integration.id, item, expectedPhone: phone }));
  const counts = summarizeEvolutionResults(results);
  console.info('[Evolution Sync]', { instance: api.instance, conversationId: conversation.id, total: items.length, fallback_used, counts });
  return { counts, scanned: items.length, fallback_used, synchronized_at: new Date().toISOString() };

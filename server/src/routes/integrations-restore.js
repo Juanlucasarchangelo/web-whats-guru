@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { randomBytes, createCipheriv, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, createCipheriv, createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
+import { visibleChannelIds, admin } from '../services/channel-access.js';
 import { syncEvolutionStatus, getEvolutionWebhookInfo, configureEvolutionWebhook } from '../services/evolution.js';
 
 const key = () => {
@@ -11,13 +12,13 @@ const key = () => {
   if (!secret || secret.length < 32) throw new HttpError(503,'Defina INTEGRATION_ENCRYPTION_KEY (32 caracteres ou mais) em server/.env');
   return createHash('sha256').update(secret).digest();
 };
-function encrypt(value) {
+export function encrypt(value) {
   const iv=randomBytes(12), cipher=createCipheriv('aes-256-gcm',key(),iv);
   const ciphertext=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);
   return `enc:${Buffer.concat([iv,cipher.getAuthTag(),ciphertext]).toString('base64')}`;
 }
 function checkAdmin(req) {if(!['owner','admin'].includes(req.role))throw new HttpError(403,'Somente administrador.');}
-async function providerUrl(input){
+export async function providerUrl(input){
   let url;
   try { url = new URL(input); } catch { throw new HttpError(400, 'URL Evolution inválida'); }
   if (url.username || url.password || url.search || url.hash) {
@@ -47,21 +48,29 @@ async function providerUrl(input){
   return url.origin + url.pathname.replace(/\/$/, '');
 }
 
-async function providerFetch(url, options){
+export async function providerFetch(url, options){
   const response=await fetch(url,{...options,signal:AbortSignal.timeout(15000),redirect:'error'});
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw new HttpError(502,`Evolution respondeu HTTP ${response.status}: ${String(data?.response?.message||data?.message||'Falha no provedor').slice(0,160)}`);
   return data;
 }
 async function saveIntegration(req,{type,name,config,status,token='',verify='',appSecret=''}){
-  const integration=await prisma.integration.upsert({where:{org_id_type:{org_id:req.orgId,type}},create:{org_id:req.orgId,type,name,config,status,last_connected_at: status==='connected'?new Date():null},update:{name,config,status,last_connected_at: status==='connected'?new Date():null}});
+  const where={org_id:req.orgId,type};
+  const current=type==='whatsapp' && config?.provider==='evolution_api'
+    ? (await prisma.integration.findMany({where})).find(i=>i.config?.provider==='evolution_api'&&i.config?.instance_name===config.instance_name)
+    : await prisma.integration.findFirst({where,orderBy:{created_at:'asc'}});
+  const integration=current
+    ? await prisma.integration.update({where:{id:current.id},data:{name,config,status,last_connected_at:status==='connected'?new Date():null}})
+    : await prisma.integration.create({data:{id:randomUUID(),org_id:req.orgId,type,name,config,status,last_connected_at:status==='connected'?new Date():null}});
   if(token){await prisma.integrationCredential.upsert({where:{integration_id:integration.id},create:{integration_id:integration.id,org_id:req.orgId,access_token:encrypt(token),verify_token:encrypt(verify||randomBytes(24).toString('hex')),app_secret:appSecret?encrypt(appSecret):null},update:{access_token:encrypt(token),verify_token:encrypt(verify||randomBytes(24).toString('hex')),app_secret:appSecret?encrypt(appSecret):null}});}
   return integration;
 }
 export function restoredIntegrationsRouter(){
  const router=Router();
- router.get('/',wrap(async(req,res)=>{try{await syncEvolutionStatus(req.orgId);}catch(error){console.warn('Evolution status:',error.message);}const data=await prisma.integration.findMany({where:{org_id:req.orgId}});res.json({data:data.map(i=>({...i,config:i.config??{}}))});}));
- router.get('/whatsapp/status',wrap(async(req,res)=>{const state=await syncEvolutionStatus(req.orgId);if(!state)throw new HttpError(404,'Nenhuma Evolution configurada nesta organizacao.');res.json(state);}));
+ router.get('/',wrap(async(req,res)=>{const connected=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'}});for(const row of connected){if(row.config?.provider==='evolution_api')try{await syncEvolutionStatus(req.orgId,row.id);}catch(error){console.warn('Evolution status:',error.message);}}const data=await prisma.integration.findMany({where:{org_id:req.orgId}});const visible=admin(req)?data:data.filter(i=>i.type!=='whatsapp');
+   if(!admin(req)){const ids=await visibleChannelIds(req);visible.push(...data.filter(i=>i.type==='whatsapp'&&ids.includes(i.id)));}
+   res.json({data:visible.map(i=>({...i,config:i.config??{}}))});}));
+ router.get('/whatsapp/status',wrap(async(req,res)=>{const allowed=await visibleChannelIds(req);const state=await syncEvolutionStatus(req.orgId,allowed[0]??'00000000-0000-0000-0000-000000000000');if(!state)throw new HttpError(404,'Nenhuma Evolution configurada nesta organizacao.');res.json(state);}));
  router.get('/whatsapp/diagnostics',wrap(async(req,res)=>{
    const integration=await prisma.integration.findFirst({where:{org_id:req.orgId,type:'whatsapp'}});
    if(!integration)throw new HttpError(404,'WhatsApp nao configurado nesta organizacao.');
@@ -86,15 +95,16 @@ export function restoredIntegrationsRouter(){
    if(!publicUrl || !/^https?:\/\//.test(publicUrl)||!secret||secret.length<32)
      throw new HttpError(400,'Configure EVOLUTION_WEBHOOK_PUBLIC_URL e EVOLUTION_WEBHOOK_SECRET (min. 32 caracteres) no server/.env.');
    const url=`${publicUrl}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
-   const configured=await configureEvolutionWebhook(req.orgId,url);
-   const webhook=await getEvolutionWebhookInfo(req.orgId).catch(error=>({verification_error:error.message}));
+   const integrationId=req.body?.integration_id||null;
+   const configured=await configureEvolutionWebhook(req.orgId,url,integrationId);
+   const webhook=await getEvolutionWebhookInfo(req.orgId,integrationId).catch(error=>({verification_error:error.message}));
    res.json({configured:configured.ok,instance:configured.instance,webhook});
  }));
  router.get('/activity',wrap(async(req,res)=>{const [audit,events]=await Promise.all([prisma.auditLog.findMany({where:{org_id:req.orgId},orderBy:{created_at:'desc'},take:50}),prisma.webhookEvent.findMany({where:{org_id:req.orgId},orderBy:{received_at:'desc'},take:50})]);res.json({audit,events});}));
  router.post('/whatsapp',wrap(async(req,res)=>{
   checkAdmin(req);const {action}=req.body||{};
   if(action==='disconnect'){
-   await prisma.integration.updateMany({where:{org_id:req.orgId,type:'whatsapp'},data:{status:'disconnected'}});
+   await prisma.integration.updateMany({where:{org_id:req.orgId,type:'whatsapp',...(req.body?.integration_id?{id:req.body.integration_id}:{})},data:{status:'disconnected'}});
    return res.json({disconnected:true});
   }
   if(action==='connect_unofficial'){
@@ -108,8 +118,8 @@ export function restoredIntegrationsRouter(){
    if(!info?.base64&&!info?.qrcode?.base64)info=await providerFetch(`${url}/instance/connect/${encodeURIComponent(instance_name)}`,{method:'GET',headers});
    const rawQr=info?.base64??info?.qrcode?.base64??null;
    const qr=rawQr ? (rawQr.startsWith('data:image/')?rawQr:`data:image/png;base64,${rawQr}`) : null;
-   await saveIntegration(req,{type:'whatsapp',name:'WhatsApp Business Platform',config:{connection_mode:'unofficial',provider:'evolution_api',provider_url:url,instance_name},status:'connecting',token:api_key});
-   return res.json({connected:true,provider:'evolution_api',qr_code:qr});
+   const saved=await saveIntegration(req,{type:'whatsapp',name:'WhatsApp Business Platform',config:{connection_mode:'unofficial',provider:'evolution_api',provider_url:url,instance_name,team_ids:(await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'}})).find(i=>i.config?.instance_name===instance_name)?.config?.team_ids??[]},status:'connecting',token:api_key});
+   return res.json({connected:true,integration_id:saved.id,provider:'evolution_api',qr_code:qr});
   }
   if(action==='connect'){
    const {phone_number_id,business_account_id,access_token,app_secret}=req.body||{};

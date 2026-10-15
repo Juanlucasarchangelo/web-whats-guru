@@ -75,13 +75,15 @@ async function saveSession(ctx, data) {
   const fresh = await prisma.contact.findFirst({ where: { id: ctx.contact.id, org_id: ctx.orgId }, select: { custom_fields: true } });
   const base = fresh?.custom_fields && typeof fresh.custom_fields === 'object' && !Array.isArray(fresh.custom_fields) ? fresh.custom_fields : {};
   const updated = { ...base };
-  if (data) updated[SESSION_KEY] = data;
-  else delete updated[SESSION_KEY];
+  const scopedKey = `${SESSION_KEY}_${ctx.conversation.id}`;
+  if (data) updated[scopedKey] = data;
+  else delete updated[scopedKey];
+  delete updated[SESSION_KEY];
   await prisma.contact.update({ where: { id: ctx.contact.id }, data: { custom_fields: updated } });
   ctx.contact.custom_fields = updated;
 }
 function sessionOf(ctx) {
-  const state = ctx.contact.custom_fields?.[SESSION_KEY];
+  const state = ctx.contact.custom_fields?.[`${SESSION_KEY}_${ctx.conversation.id}`] ?? ctx.contact.custom_fields?.[SESSION_KEY];
   return state && state.conversation_id === ctx.conversation.id ? state : null;
 }
 async function tag(ctx, name, notify = true) {
@@ -104,6 +106,9 @@ async function assign(ctx, teamName) {
   if (!team) throw Error(`Time nao encontrado: ${name}. Cadastre-o primeiro na tela Equipe.`);
   const members = await prisma.teamMember.findMany({ where: { team_id: team.id }, select: { user_id: true } });
   const ids = members.map(m => m.user_id);
+  const source = await prisma.integration.findFirst({where:{id:ctx.conversation.integration_id??'',org_id:ctx.orgId,type:'whatsapp'},select:{config:true}});
+  const restrictions=Array.isArray(source?.config?.team_ids)?source.config.team_ids:[];
+  if(restrictions.length && !restrictions.includes(team.id))throw Error(`O time ${name} nao tem permissao para atender este WhatsApp.`);
   const active = ids.length ? await prisma.orgMember.findFirst({ where: { org_id: ctx.orgId, user_id: { in: ids }, status: 'active' }, orderBy: { created_at: 'asc' } }) : null;
   if (!active) throw Error(`Time ${name} sem atendente ativo.`);
   await prisma.conversation.update({ where: { id: ctx.conversation.id }, data: { assigned_to: active.user_id } });

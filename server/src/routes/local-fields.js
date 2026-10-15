@@ -103,6 +103,10 @@ export const localFields = {
       "type": "String",
       "isRequired": true
     },
+    "integration_id": {
+      "type": "String",
+      "isRequired": false
+    },
     "status": {
       "type": "String",
       "isRequired": true

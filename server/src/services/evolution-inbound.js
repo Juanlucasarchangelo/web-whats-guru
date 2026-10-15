@@ -5,7 +5,7 @@ import { processIncomingWorkflows } from './workflow-engine.js';
 const ignored = reason => ({ outcome: reason });
 
 /** Import from webhook or Evolution history; only message text/caption is supported. */
-export async function importEvolutionMessage({ orgId, item, envelope = {}, expectedPhone = null, triggerAutomations = false }) {
+export async function importEvolutionMessage({ orgId, integrationId = null, item, envelope = {}, expectedPhone = null, triggerAutomations = false }) {
   const key = item?.key ?? item?.data?.key ?? {};
   if (!key.id) return ignored('ignored_missing_id');
   if ([true, 'true', 1, '1'].includes(key.fromMe)) return ignored('ignored_own_message');
@@ -16,7 +16,9 @@ export async function importEvolutionMessage({ orgId, item, envelope = {}, expec
   if (expectedPhone && phone !== digits(expectedPhone)) return ignored('ignored_other_contact');
   const text = getEvolutionText(item);
   if (typeof text !== 'string' || !text.trim()) return ignored('ignored_unsupported_type');
-  const messageId = stableMessageId(String(key.id));
+  const primary = await prisma.integration.findFirst({where:{org_id:orgId,type:'whatsapp'},orderBy:[{created_at:'asc'},{id:'asc'}],select:{id:true}});
+  const channelId = integrationId ?? primary?.id ?? null;
+  const messageId = stableMessageId(channelId===primary?.id ? String(key.id) : `${channelId}:${key.id}`);
   if (await prisma.message.findUnique({ where: { id: messageId }, select: { id: true } })) return ignored('duplicate');
 
   let contact = await prisma.contact.findFirst({
@@ -33,7 +35,7 @@ export async function importEvolutionMessage({ orgId, item, envelope = {}, expec
     contact = await prisma.contact.create({ data: { id: randomUUID(), org_id: orgId, phone: `+${phone}`, name, custom_fields: {} } });
   }
   let conversation = await prisma.conversation.findFirst({
-    where: { org_id: orgId, contact_id: contact.id, channel: 'whatsapp', status: { not: 'closed' } },
+    where: { org_id: orgId, contact_id: contact.id, channel: 'whatsapp', integration_id: channelId, status: { not: 'closed' } },
     orderBy: { last_message_at: 'desc' },
   });
   // A conversation opened manually by an agent still counts as a new inbound
@@ -42,7 +44,7 @@ export async function importEvolutionMessage({ orgId, item, envelope = {}, expec
     where: { org_id: orgId, conversation_id: conversation.id, sender_type: 'contact' },
   }) === 0;
   if (!conversation) conversation = await prisma.conversation.create({
-    data: { id: randomUUID(), org_id: orgId, contact_id: contact.id, channel: 'whatsapp', status: 'open' },
+    data: { id: randomUUID(), org_id: orgId, contact_id: contact.id, channel: 'whatsapp', integration_id: channelId, status: 'open' },
   });
   const timestamp = validTime(item?.messageTimestamp ?? item?.data?.messageTimestamp);
   try {

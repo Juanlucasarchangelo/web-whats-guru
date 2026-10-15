@@ -14,6 +14,7 @@ import {
   Tag as TagIcon, StickyNote, Zap, CheckCheck, Check, Circle,
   Inbox as InboxIcon, X, MoreVertical, UserCheck, Archive, MessageCircle,
 } from 'lucide-react';
+interface ChannelInfo { id:string; name:string; instance_name:string|null; provider:string; status:string; }
 interface OrgMemberInfo {
   user_id: string;
   role: string;
@@ -27,6 +28,9 @@ export function InboxPage() {
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [availableContacts, setAvailableContacts] = useState<Contact[]>([]);
   const [newContactId, setNewContactId] = useState('');
+  const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  const [channelFilter, setChannelFilter] = useState('all');
+  const [newChannelId, setNewChannelId] = useState('');
   const [contactsMap, setContactsMap] = useState<Record<string, Contact>>({});
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -64,6 +68,7 @@ export function InboxPage() {
         .select('*')
         .eq('org_id', orgId)
         .order('last_message_at', { ascending: false });
+      if (channelFilter !== 'all') query = query.eq('integration_id', channelFilter);
       if (statusFilter !== 'all') query = query.eq('status', statusFilter);
       if (assigneeFilter === 'me') query = query.eq('assigned_to', user!.id);
       if (assigneeFilter === 'unassigned') query = query.is('assigned_to', null);
@@ -83,6 +88,7 @@ export function InboxPage() {
       const { data, error } = await query;
       if (error) throw error;
       let convList = (data ?? []) as Conversation[];
+
       if (search.trim()) {
         const contactIds = convList.map(c => c.contact_id);
         if (contactIds.length > 0) {
@@ -113,7 +119,7 @@ export function InboxPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, user]);
+  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, channelFilter, user]);
   // Detecta o provedor da organizacao para mostrar opcoes compatíveis.
   useEffect(() => {
     if (!orgId) { setWhatsAppProvider('unknown'); return; }
@@ -132,6 +138,17 @@ export function InboxPage() {
     return () => { active = false; };
   }, [orgId]);
 
+  useEffect(() => {
+    if(!orgId)return;
+    let active=true;
+    apiRequest<{data:ChannelInfo[]}>('/channels').then(r=>{
+      if(!active)return;
+      setChannels(r.data??[]);
+      setNewChannelId(r.data?.length===1?r.data[0].id:'');
+    }).catch(err=>console.warn('[Inbox] Números indisponíveis:',err));
+    return()=>{active=false;};
+  },[orgId]);
+  const selectedChannel = channels.find(c=>c.id===selectedConv?.integration_id);
   // Load tags, quick replies, and members
   useEffect(() => {
     if (!orgId) return;
@@ -289,9 +306,10 @@ export function InboxPage() {
   }
   async function createConversation() {
     if (!newContactId) return;
+    if (!newChannelId) {toastError('Selecione o número de WhatsApp para esta conversa.');return;}
     try {
       const conversation = await apiRequest<Conversation>('/conversations', {
-        method: 'POST', body: JSON.stringify({contact_id:newContactId,channel:'whatsapp'}),
+        method: 'POST', body: JSON.stringify({contact_id:newContactId,channel:'whatsapp',integration_id:newChannelId}),
       });
       setContactsMap(prev => ({...prev, ...Object.fromEntries(availableContacts.map(c=>[c.id,c]))}));
       setSelectedConv(conversation);
@@ -455,6 +473,11 @@ export function InboxPage() {
           <button type="button" className="btn-primary w-full justify-center" onClick={openNewConversation}><Plus size={16}/> Nova conversa</button>
           {creatingConversation && <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 space-y-2">
             <p className="text-sm font-medium">Selecione um contato</p>
+            <label className="text-xs font-medium">Enviar pelo número</label>
+            <select className="input w-full" value={newChannelId} onChange={e=>setNewChannelId(e.target.value)}>
+              <option value="">Selecione um WhatsApp</option>
+              {channels.map(c=><option key={c.id} value={c.id}>{c.name} ({c.instance_name||'Oficial'})</option>)}
+            </select>
             {availableContacts.length ? <><select className="input w-full" value={newContactId} onChange={e=>setNewContactId(e.target.value)}>
               {availableContacts.map(c=><option key={c.id} value={c.id}>{c.name} {c.phone ? `(${c.phone})` : ''}</option>)}
             </select><div className="flex gap-2"><button className="btn-primary" onClick={createConversation}>Criar</button><button className="btn-secondary" onClick={()=>setCreatingConversation(false)}>Cancelar</button></div></>
@@ -470,6 +493,10 @@ export function InboxPage() {
               {webhookInfo && <p role="status" className="break-words">{webhookInfo}</p>}
             </div>
           )}
+          <select className="input w-full text-sm" aria-label="Filtrar número de WhatsApp" value={channelFilter} onChange={e=>{setChannelFilter(e.target.value);setSelectedConv(null);}}>
+            <option value="all">Todos os números</option>
+            {channels.map(c=><option key={c.id} value={c.id}>{c.name} · {c.instance_name||'Oficial'}</option>)}
+          </select>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
@@ -549,6 +576,7 @@ export function InboxPage() {
                     <p className="text-xs text-slate-400 mt-0.5">
                       {conv.status === 'open' ? 'Aberta' : conv.status === 'pending' ? 'Pendente' : 'Fechada'}
                       {memberName(conv.assigned_to) && ` · ${memberName(conv.assigned_to)}`}
+                      {channels.length>1 && ` · ${channels.find(x=>x.id===conv.integration_id)?.name||'Número antigo'}`}
                     </p>
                   </div>
                 </button>
@@ -575,6 +603,7 @@ export function InboxPage() {
                   }`}>
                     {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'pending' ? 'Pendente' : 'Fechada'}
                   </span>
+                  {selectedChannel && <span className="text-xs text-green-700 rounded bg-green-50 px-2 py-0.5">WhatsApp: {selectedChannel.name} ({selectedChannel.instance_name||'Oficial'})</span>}
                   {memberName(selectedConv.assigned_to) && (
                     <span className="text-xs text-slate-400">{memberName(selectedConv.assigned_to)}</span>
                   )}

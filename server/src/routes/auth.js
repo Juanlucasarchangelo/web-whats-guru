@@ -68,6 +68,14 @@ export function authRouter(config, authLimiter) {
     }) : [];
     res.json({ user: req.user, profile, organizations: organizations.map((o) => ({ ...o, role: memberships.find((m) => m.org_id === o.id)?.role })) });
   }));
+  router.post('/change-password',authenticate(config),wrap(async(req,res)=>{
+    const input=z.object({current_password:z.string().min(1),new_password:z.string().min(10).max(128)}).strict().parse(req.body);
+    const user=await prisma.user.findUnique({where:{id:req.user.id},select:{password_hash:true}});
+    if(!user || !(await bcrypt.compare(input.current_password,user.password_hash)))throw new HttpError(403,'Senha atual incorreta.');
+    const password_hash=await bcrypt.hash(input.new_password,12);
+    await prisma.user.update({where:{id:req.user.id},data:{password_hash}});
+    res.json({changed:true});
+  }));
   // Logout no cliente descarta o token. Revogacao imediata sera adicionada antes da producao.
   router.post('/logout', authenticate(config), (_req, res) => res.status(204).end());
   return router;
