@@ -1,0 +1,8 @@
+[functions.webhook-handler]
+verify_jwt = false
+
+[functions.whatsapp-api]
+verify_jwt = false
+
+[functions.integration-api]
+verify_jwt = false
