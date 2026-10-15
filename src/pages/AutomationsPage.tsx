@@ -2,11 +2,12 @@ import { useEffect, useState, useCallback } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { apiRequest } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { toastSuccess, toastError } from '@/components/ui/Toast';
+import { toastSuccess, toastError, toastWarning } from '@/components/ui/Toast';
 import type { Automation } from '@/types';
 import {
   Zap, Plus, Pencil, Trash2, Play, Pause,
@@ -39,6 +40,7 @@ export function AutomationsPage() {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null);
   const [saving, setSaving] = useState(false);
+  const [recentRuns, setRecentRuns] = useState<{id:string;event_type:string;processed:boolean;error?:string;received_at:string}[]>([]);
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -60,6 +62,8 @@ export function AutomationsPage() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       setAutomations((data ?? []) as Automation[]);
+      const activity = await apiRequest<{events: {id:string;source:string;event_type:string;processed:boolean;error?:string;received_at:string}[]}>('/integrations/activity').catch(() => ({events: []}));
+      setRecentRuns((activity.events ?? []).filter(e => e.source === 'workflow_engine').slice(0, 8));
     } catch {
       toastError('Erro ao carregar automações');
     } finally {
@@ -109,6 +113,15 @@ export function AutomationsPage() {
 
   async function handleSave() {
     if (!orgId || !user || !name.trim()) return;
+    if (!actions.length) { toastWarning('Adicione ao menos uma ação.'); return; }
+    if (triggerType === 'keyword' && !triggerKeyword.trim()) { toastWarning('Informe a palavra-chave.'); return; }
+    if (triggerType === 'tag_added' && !triggerTag.trim()) { toastWarning('Informe o nome da etiqueta.'); return; }
+    if (triggerType === 'no_response' && !(Number(triggerTimeout) >= 1 && Number(triggerTimeout) <= 10080)) { toastWarning('Informe um tempo entre 1 e 10080 minutos.'); return; }
+    for (const a of actions) {
+      if (a.type === 'send_message' && !a.text?.trim() || a.type === 'add_tag' && !a.tag?.trim() || a.type === 'assign_team' && !a.team?.trim() || a.type === 'call_webhook' && !a.url?.trim()) {
+        toastWarning('Preencha todos os dados das ações.'); return;
+      }
+    }
     setSaving(true);
     try {
       const trigger: Record<string, unknown> = { type: triggerType };
@@ -124,6 +137,7 @@ export function AutomationsPage() {
         trigger,
         actions: actions as any,
         created_by: user.id,
+        ...(!editing ? { status: 'paused' } : {}),
       };
 
       if (editing) {
@@ -136,7 +150,7 @@ export function AutomationsPage() {
       } else {
         const { error } = await supabase.from('automations').insert(payload);
         if (error) throw error;
-        toastSuccess('Automação criada');
+        toastSuccess('Automação criada. Ative-a quando estiver pronta para enviar mensagens.');
       }
       setShowModal(false);
       load();
@@ -197,11 +211,12 @@ export function AutomationsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Automações</h1>
-          <p className="text-sm text-slate-500 mt-1">{automations.length} automação(ões) · Regras locais, sem executor automático.</p>
+          <p className="text-sm text-slate-500 mt-1">{automations.length} automação(ões) · Executor ligado às mensagens recebidas pela Evolution.</p>
         </div>
         <button onClick={openCreate} className="btn-primary"><Plus size={18} /> Nova automação</button>
       </div>
 
+      <p className="text-xs text-slate-500 mb-4">Ao criar uma automação ela fica pausada até você ativar. Variáveis disponíveis nas mensagens: {'{{nome}}'}, {'{{telefone}}'} e {'{{resposta}}'}. Fuso horário: São Paulo.</p>
       {loading ? (
         <div className="flex justify-center py-12"><Spinner size={32} /></div>
       ) : automations.length === 0 ? (
@@ -266,6 +281,16 @@ export function AutomationsPage() {
           ))}
         </div>
       )}
+
+      <div className="card p-4 mt-6">
+        <h3 className="font-semibold text-slate-800">Últimas execuções de automações e chatbots</h3>
+        {recentRuns.length === 0 ? <p className="text-sm text-slate-500 mt-2">Nenhuma execução registrada ainda. Envie uma mensagem de teste e atualize a página.</p> :
+          <div className="mt-3 space-y-2">{recentRuns.map(log => <div key={log.id} className="text-xs flex items-start gap-2">
+            <span className={log.processed ? 'text-green-700' : 'text-red-700'}>{log.processed ? 'OK' : 'ERRO'}</span>
+            <span className="text-slate-600 flex-1 break-all">{log.event_type}{log.error ? ` — ${log.error}` : ''}</span>
+            <span className="text-slate-400">{new Date(log.received_at).toLocaleTimeString('pt-BR')}</span>
+          </div>)}</div>}
+      </div>
 
       {/* Create/Edit modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? 'Editar automação' : 'Nova automação'} size="lg">

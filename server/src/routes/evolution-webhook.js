@@ -36,7 +36,7 @@ export function evolutionWebhookRouter() {
       if (event === 'messages.upsert') {
         const results = [];
         for (const item of evolutionEventItems(payload)) {
-          results.push(await importEvolutionMessage({ orgId: integration.org_id, item, envelope: payload }));
+          results.push(await importEvolutionMessage({ orgId: integration.org_id, item, envelope: payload, triggerAutomations: true }));
         }
         counts = summarizeEvolutionResults(results);
         if (results.length === 0) counts.empty_payload = 1;

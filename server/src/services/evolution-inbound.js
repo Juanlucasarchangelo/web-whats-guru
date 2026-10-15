@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
 import { digits, stableMessageId, inboundPhone, getEvolutionText, validTime } from './evolution-payload.js';
+import { processIncomingWorkflows } from './workflow-engine.js';
 const ignored = reason => ({ outcome: reason });
 
 /** Import from webhook or Evolution history; only message text/caption is supported. */
-export async function importEvolutionMessage({ orgId, item, envelope = {}, expectedPhone = null }) {
+export async function importEvolutionMessage({ orgId, item, envelope = {}, expectedPhone = null, triggerAutomations = false }) {
   const key = item?.key ?? item?.data?.key ?? {};
   if (!key.id) return ignored('ignored_missing_id');
   if ([true, 'true', 1, '1'].includes(key.fromMe)) return ignored('ignored_own_message');
@@ -35,6 +36,11 @@ export async function importEvolutionMessage({ orgId, item, envelope = {}, expec
     where: { org_id: orgId, contact_id: contact.id, channel: 'whatsapp', status: { not: 'closed' } },
     orderBy: { last_message_at: 'desc' },
   });
+  // A conversation opened manually by an agent still counts as a new inbound
+  // conversation when the customer replies for the first time.
+  const isNew = !conversation || await prisma.message.count({
+    where: { org_id: orgId, conversation_id: conversation.id, sender_type: 'contact' },
+  }) === 0;
   if (!conversation) conversation = await prisma.conversation.create({
     data: { id: randomUUID(), org_id: orgId, contact_id: contact.id, channel: 'whatsapp', status: 'open' },
   });
@@ -55,6 +61,12 @@ export async function importEvolutionMessage({ orgId, item, envelope = {}, expec
   } catch (error) {
     if (error?.code === 'P2002') return ignored('duplicate');
     throw error;
+  }
+  if (triggerAutomations) {
+    // Failure to execute a bot must never roll back a successfully received message.
+    try {
+      await processIncomingWorkflows({ orgId, conversationId: conversation.id, text: text.trim(), isNew, messageId });
+    } catch (error) { console.error('[Workflow] Falha apos mensagem recebida:', { conversationId: conversation.id, messageId, error: error.message }); }
   }
   return { outcome: 'received', conversationId: conversation.id };
 }

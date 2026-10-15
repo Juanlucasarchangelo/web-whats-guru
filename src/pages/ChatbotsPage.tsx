@@ -40,6 +40,7 @@ export function ChatbotsPage() {
   // Builder state
   const [botName, setBotName] = useState('');
   const [botDesc, setBotDesc] = useState('');
+  const [botKeyword, setBotKeyword] = useState('');
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
@@ -79,11 +80,13 @@ export function ChatbotsPage() {
     if (bot) {
       setBotName(bot.name);
       setBotDesc(bot.description ?? '');
+      setBotKeyword(bot.trigger_keyword ?? '');
       setNodes(bot.flow.nodes ?? []);
       setEdges(bot.flow.edges ?? []);
     } else {
       setBotName('');
       setBotDesc('');
+      setBotKeyword('');
       setNodes([
         {
           id: 'start',
@@ -113,7 +116,7 @@ export function ChatbotsPage() {
       setEdges(prev => [...prev, { from: lastNode.id, to: id }]);
     }
     setSelectedNode(newNode);
-    setNodeText(newNode.data.text ?? '');
+    selectNode(newNode);
   }
 
   function getDefaultNodeData(type: FlowNode['type']): FlowNode['data'] {
@@ -192,6 +195,10 @@ export function ChatbotsPage() {
       return;
     }
 
+    if (nodes.length < 2 || edges.length < 1) {
+      toastWarning('Adicione pelo menos uma mensagem ao fluxo antes de salvar.');
+      return;
+    }
     setSaving(true);
     try {
       const flow = { nodes, edges };
@@ -201,6 +208,8 @@ export function ChatbotsPage() {
           .update({
             name: botName.trim(),
             description: botDesc.trim() || null,
+            trigger_channel: 'whatsapp',
+            trigger_keyword: botKeyword.trim() || null,
             flow,
             updated_at: new Date().toISOString(),
           })
@@ -213,6 +222,8 @@ export function ChatbotsPage() {
           org_id: orgId,
           name: botName.trim(),
           description: botDesc.trim() || null,
+          trigger_channel: 'whatsapp',
+          trigger_keyword: botKeyword.trim() || null,
           flow,
           created_by: user.id,
         });
@@ -229,6 +240,9 @@ export function ChatbotsPage() {
   }
 
   async function toggleStatus(bot: Chatbot) {
+    if (bot.status !== 'active' && (!bot.flow?.nodes?.length || !bot.flow?.edges?.length)) {
+      toastWarning('Configure e salve o fluxo antes de ativar o chatbot.'); return;
+    }
     const newStatus = bot.status === 'active' ? 'paused' : 'active';
     try {
       const { error } = await supabase
@@ -293,6 +307,18 @@ export function ChatbotsPage() {
           </button>
         </div>
 
+        <div className="bg-blue-50 border-b border-blue-100 px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Palavra-chave para iniciar (opcional)</label>
+            <input className="input mt-1" value={botKeyword} onChange={e => setBotKeyword(e.target.value)} placeholder="Ex.: menu, orçamento, suporte" />
+            <p className="text-xs text-slate-500 mt-1">Vazio = inicia apenas no primeiro contato. Preenchido = também inicia quando a palavra aparecer.</p>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Descrição (opcional)</label>
+            <input className="input mt-1" value={botDesc} onChange={e => setBotDesc(e.target.value)} placeholder="Objetivo do fluxo" />
+            <p className="text-xs text-slate-500 mt-1">Clique em Aplicar alterações em cada nó, Salvar e depois Ativar. Digitar atendente encerra uma pergunta.</p>
+          </div>
+        </div>
         <div className="flex flex-1 overflow-hidden">
           {/* Node palette */}
           <div className="w-56 border-r border-slate-200 bg-white p-3 overflow-y-auto">
@@ -505,7 +531,7 @@ export function ChatbotsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Chatbots</h1>
-          <p className="text-sm text-slate-500 mt-1">{chatbots.length} chatbot(s) · Os fluxos são salvos no MySQL, mas não são executados automaticamente.</p>
+          <p className="text-sm text-slate-500 mt-1">{chatbots.length} chatbot(s) · Fluxos executados no WhatsApp via Evolution; sem IA obrigatória.</p>
         </div>
         <button onClick={() => openBuilder(null)} className="btn-primary">
           <Plus size={18} /> Novo chatbot
@@ -544,7 +570,7 @@ export function ChatbotsPage() {
                 </div>
                 {bot.description && <p className="text-sm text-slate-500 mb-3 line-clamp-2">{bot.description}</p>}
                 <div className="text-xs text-slate-400 mb-3">
-                  {bot.flow.nodes?.length ?? 0} nó(s) · {bot.flow.edges?.length ?? 0} conexão(ões)
+                  {bot.flow.nodes?.length ?? 0} nó(s) · {bot.flow.edges?.length ?? 0} conexão(ões) · {bot.trigger_keyword ? `Início: ${bot.trigger_keyword}` : 'Início: nova conversa'}
                 </div>
                 <div className="flex items-center gap-2 pt-3 border-t border-slate-50">
                   <button onClick={() => openBuilder(bot)} className="btn-ghost text-xs px-2 py-1.5">
