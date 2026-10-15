@@ -15,6 +15,7 @@ import { SchedulesPage } from '@/pages/SchedulesPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { TeamPage } from '@/pages/TeamPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 import { useState } from 'react';
 
 function AppContent() {
@@ -39,6 +40,7 @@ function AppContent() {
         reports: <ReportsPage />,
         team: <TeamPage />,
         settings: <SettingsPage />,
+        profile: <ProfilePage />,
       }[currentPage]}
     </AppShell>
   );

@@ -235,6 +235,7 @@ model Campaign {
   message                String       @db.LongText
   channel                String       @default("whatsapp") @db.VarChar(64)
   segment_tags           Json         
+  integration_id         String?      @db.Char(36)
   segment_stage          String?      @db.Text
   scheduled_at           DateTime?    @db.DateTime(3)
   status                 String       @default("draft") @db.VarChar(32)
@@ -274,6 +275,8 @@ model Schedule {
   title                  String       @db.Text
   message                String?      @db.LongText
   scheduled_at           DateTime     @db.DateTime(3)
+  integration_id         String?      @db.Char(36)
+  delivery_enabled       Boolean      @default(false)
   channel                String       @default("whatsapp") @db.VarChar(64)
   status                 String       @default("pending") @db.VarChar(32)
   created_by             String       @db.Char(36)

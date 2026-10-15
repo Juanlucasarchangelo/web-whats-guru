@@ -1,178 +1,46 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastSuccess } from '@/components/ui/Toast';
+import { Modal } from '@/components/ui/Modal';
 import { Spinner } from '@/components/ui/Spinner';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { toastSuccess, toastError } from '@/components/ui/Toast';
+import { Kanban, GripVertical, Search, Pencil, Phone, Mail, CircleDollarSign, RefreshCw, Plus } from 'lucide-react';
 import type { Contact } from '@/types';
-import {
-  Kanban, Plus, GripVertical, DollarSign, Mail, Phone,
-} from 'lucide-react';
-
-const STAGES = [
-  { value: 'lead', label: 'Lead', color: 'border-t-blue-500', badge: 'badge-blue' },
-  { value: 'qualified', label: 'Qualificado', color: 'border-t-yellow-500', badge: 'badge-yellow' },
-  { value: 'negotiation', label: 'Negociação', color: 'border-t-purple-500', badge: 'badge-purple' },
-  { value: 'won', label: 'Ganho', color: 'border-t-green-500', badge: 'badge-green' },
-  { value: 'lost', label: 'Perdido', color: 'border-t-red-500', badge: 'badge-red' },
-];
-
-export function CrmPage() {
-  const { currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('org_id', orgId)
-        .order('updated_at', { ascending: false });
-      if (error) throw error;
-      setContacts((data ?? []) as Contact[]);
-    } catch {
-      toastError('Erro ao carregar contatos');
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function handleDrop(stage: string) {
-    if (!draggedId) return;
-    const contact = contacts.find(c => c.id === draggedId);
-    if (!contact || contact.crm_stage === stage) {
-      setDraggedId(null);
-      setDragOverStage(null);
-      return;
-    }
-
-    setContacts(prev => prev.map(c => c.id === draggedId ? { ...c, crm_stage: stage } : c));
-    setDraggedId(null);
-    setDragOverStage(null);
-
-    try {
-      const { error } = await supabase
-        .from('contacts')
-        .update({ crm_stage: stage, updated_at: new Date().toISOString() })
-        .eq('id', contact.id);
-      if (error) throw error;
-      toastSuccess(`${contact.name} movido para "${STAGES.find(s => s.value === stage)?.label}"`);
-    } catch {
-      toastError('Erro ao mover contato');
-      load();
-    }
-  }
-
-  const contactsByStage = (stage: string) => contacts.filter(c => c.crm_stage === stage);
-  const totalValue = contacts
-    .filter(c => !['lost', 'won'].includes(c.crm_stage))
-    .reduce((sum, c) => sum + Number(c.crm_value), 0);
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner size={32} /></div>;
-
-  return (
-    <div className="p-4 lg:p-6 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">CRM Kanban</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {contacts.length} contato(s) · Pipeline: {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-          </p>
-        </div>
-      </div>
-
-      {contacts.length === 0 ? (
-        <div className="card flex-1">
-          <EmptyState
-            icon={<Kanban size={28} />}
-            title="Nenhum contato no CRM"
-            description="Crie contatos na aba Contatos para visualizá-los no kanban."
-          />
-        </div>
-      ) : (
-        <div className="flex-1 overflow-x-auto">
-          <div className="flex gap-4 min-w-max h-full pb-4">
-            {STAGES.map(stage => {
-              const stageContacts = contactsByStage(stage.value);
-              const stageValue = stageContacts.reduce((sum, c) => sum + Number(c.crm_value), 0);
-              return (
-                <div
-                  key={stage.value}
-                  className={`w-72 flex-shrink-0 flex flex-col rounded-xl bg-slate-100/70 ${
-                    dragOverStage === stage.value ? 'ring-2 ring-blue-400' : ''
-                  }`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOverStage(stage.value); }}
-                  onDragLeave={() => setDragOverStage(null)}
-                  onDrop={() => handleDrop(stage.value)}
-                >
-                  <div className={`px-4 py-3 border-t-4 rounded-t-xl ${stage.color} bg-white`}>
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-semibold text-slate-900 text-sm">{stage.label}</h3>
-                      <span className="badge badge-gray">{stageContacts.length}</span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {stageValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </p>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                    {stageContacts.map(contact => (
-                      <div
-                        key={contact.id}
-                        draggable
-                        onDragStart={() => setDraggedId(contact.id)}
-                        onDragEnd={() => { setDraggedId(null); setDragOverStage(null); }}
-                        className={`bg-white rounded-lg p-3 shadow-sm ring-1 ring-slate-200 cursor-move hover:shadow-md transition-all ${
-                          draggedId === contact.id ? 'opacity-50' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-2 mb-2">
-                          <GripVertical size={14} className="text-slate-300 mt-0.5 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-900 truncate">{contact.name}</p>
-                            {contact.is_demo && <span className="text-[10px] text-slate-400">Demo</span>}
-                          </div>
-                        </div>
-                        {contact.crm_value > 0 && (
-                          <div className="flex items-center gap-1.5 text-xs text-slate-600 mb-1">
-                            <DollarSign size={12} className="text-green-600" />
-                            {contact.crm_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </div>
-                        )}
-                        {contact.email && (
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500 truncate">
-                            <Mail size={12} className="text-slate-400 flex-shrink-0" />
-                            <span className="truncate">{contact.email}</span>
-                          </div>
-                        )}
-                        {contact.phone && (
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                            <Phone size={12} className="text-slate-400 flex-shrink-0" />
-                            {contact.phone}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {stageContacts.length === 0 && (
-                      <div className="text-center py-6 text-xs text-slate-400">
-                        Arraste contatos aqui
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const STAGES=[{value:'lead',label:'Lead',color:'border-t-blue-500'},{value:'qualified',label:'Qualificado',color:'border-t-amber-500'},{value:'negotiation',label:'Negociação',color:'border-t-purple-500'},{value:'won',label:'Ganho',color:'border-t-green-500'},{value:'lost',label:'Perdido',color:'border-t-red-500'}];
+const brl=(n:number)=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+export function CrmPage(){
+ const {currentOrg}=useOrg();const [contacts,setContacts]=useState<Contact[]>([]);const [loading,setLoading]=useState(true);
+ const [search,setSearch]=useState('');const [dragged,setDragged]=useState<string|null>(null);const [over,setOver]=useState<string|null>(null);
+ const [editing,setEditing]=useState<Contact|null>(null);const [editStage,setEditStage]=useState('lead');const [editValue,setEditValue]=useState('0');const [editNotes,setEditNotes]=useState('');const [saving,setSaving]=useState(false);const [newOpen,setNewOpen]=useState(false);const [newLead,setNewLead]=useState({name:'',phone:'',email:'',crm_value:'0'});
+ const load=useCallback(async(silent=false)=>{if(!currentOrg?.id)return;if(!silent)setLoading(true);try{const {data,error}=await supabase.from('contacts').select('*').eq('org_id',currentOrg.id).order('updated_at',{ascending:false});if(error)throw error;setContacts((data||[]) as Contact[]);}catch(e){toastError(e instanceof Error?e.message:'Erro ao carregar CRM');}finally{setLoading(false);}},[currentOrg?.id]);
+ useEffect(()=>{void load();},[load]);
+ async function move(id:string,stage:string){const c=contacts.find(x=>x.id===id);if(!c||c.crm_stage===stage)return;
+  setContacts(prev=>prev.map(x=>x.id===id?{...x,crm_stage:stage}:x));try{const {error}=await supabase.from('contacts').update({crm_stage:stage}).eq('id',id);if(error)throw error;toastSuccess(`${c.name} movido para ${STAGES.find(x=>x.value===stage)?.label}`);}catch(e){toastError(e instanceof Error?e.message:'Erro ao mover contato');void load(true);}}
+ function edit(c:Contact){setEditing(c);setEditStage(c.crm_stage);setEditValue(String(c.crm_value||0));setEditNotes(String(c.custom_fields?.crm_notes||''));}
+ async function save(){if(!editing)return;const num=Number(editValue.replace(',','.'));if(!Number.isFinite(num)||num<0||num>9999999999)return toastError('Valor inválido.');setSaving(true);
+  try{const {error}=await supabase.from('contacts').update({crm_stage:editStage,crm_value:num,custom_fields:{...(editing.custom_fields||{}),crm_notes:editNotes.trim()}}).eq('id',editing.id);if(error)throw error;setEditing(null);toastSuccess('Oportunidade atualizada.');await load(true);}catch(e){toastError(e instanceof Error?e.message:'Erro ao salvar oportunidade');}finally{setSaving(false);}}
+ async function addLead(){if(!currentOrg?.id||newLead.name.trim().length<2)return toastError('Informe o nome do contato.');const v=Number(newLead.crm_value.replace(',','.'));if(!Number.isFinite(v)||v<0)return toastError('Valor inválido.');setSaving(true);try{const {error}=await supabase.from('contacts').insert({org_id:currentOrg.id,name:newLead.name.trim(),phone:newLead.phone.trim()||null,email:newLead.email.trim()||null,crm_stage:'lead',crm_value:v,custom_fields:{}});if(error)throw error;setNewOpen(false);setNewLead({name:'',phone:'',email:'',crm_value:'0'});toastSuccess('Oportunidade criada em Leads.');await load(true);}catch(e){toastError(e instanceof Error?e.message:'Erro ao criar oportunidade');}finally{setSaving(false);}}
+ const filtered=contacts.filter(c=>`${c.name} ${c.email||''} ${c.phone||''}`.toLowerCase().includes(search.toLowerCase()));
+ const pipeline=filtered.filter(c=>!['won','lost'].includes(c.crm_stage)).reduce((s,c)=>s+Number(c.crm_value||0),0);
+ return <div className="p-4 lg:p-6 h-full flex flex-col gap-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h1 className="text-2xl font-bold text-slate-900">CRM Kanban</h1><p className="text-sm text-slate-500">{filtered.length} contato(s) · Pipeline em aberto: {brl(pipeline)}</p></div><div className="flex gap-2"><button className="btn-secondary" onClick={()=>void load()}><RefreshCw size={16}/> Atualizar</button><button className="btn-primary" onClick={()=>setNewOpen(true)}><Plus size={16}/> Nova oportunidade</button></div></div>
+  <div className="flex gap-2 items-center bg-white border border-slate-200 rounded-lg px-3 max-w-lg"><Search size={17} className="text-slate-400"/><input className="py-2.5 outline-none flex-1 text-sm" placeholder="Buscar por nome, telefone ou e-mail" value={search} onChange={e=>setSearch(e.target.value)}/></div>
+  {loading?<div className="mx-auto p-10"><Spinner/></div>:filtered.length===0?<div className="card p-10 text-center text-slate-500"><Kanban className="mx-auto mb-2"/>Nenhum contato encontrado. Cadastre contatos na aba Contatos.</div>:
+   <div className="overflow-x-auto flex-1 pb-4"><div className="flex gap-4 min-w-max h-full">{STAGES.map(s=>{
+    const list=filtered.filter(c=>c.crm_stage===s.value);const value=list.reduce((a,c)=>a+Number(c.crm_value||0),0);
+    return <div key={s.value} className={`w-72 rounded-xl bg-slate-100/70 flex flex-col ${over===s.value?'ring-2 ring-blue-400':''}`} onDragOver={e=>{e.preventDefault();setOver(s.value);}} onDragLeave={()=>setOver(null)} onDrop={()=>{if(dragged)void move(dragged,s.value);setDragged(null);setOver(null);}}>
+     <div className={`border-t-4 ${s.color} bg-white rounded-t-xl px-4 py-3 flex justify-between`}><div><strong className="text-sm">{s.label}</strong><p className="text-xs text-slate-500">{brl(value)}</p></div><span className="badge badge-gray">{list.length}</span></div>
+     <div className="p-2 space-y-2 overflow-y-auto">{list.map(c=><div key={c.id} draggable onDragStart={()=>setDragged(c.id)} onDragEnd={()=>{setDragged(null);setOver(null);}} className="bg-white p-3 rounded-lg border border-slate-200 cursor-move hover:shadow-sm space-y-2">
+      <div className="flex items-start gap-2"><GripVertical size={14} className="text-slate-300 mt-1"/><div className="flex-1 min-w-0"><strong className="text-sm block truncate">{c.name}</strong>{c.is_demo&&<span className="text-xs text-slate-400">Demo</span>}</div><button className="text-blue-600 p-1" title="Editar oportunidade" onClick={()=>edit(c)}><Pencil size={15}/></button></div>
+      {Number(c.crm_value)>0&&<p className="text-sm text-green-700 font-medium"><CircleDollarSign size={14} className="inline mr-1"/>{brl(Number(c.crm_value))}</p>}
+      {c.phone&&<p className="text-xs text-slate-500 truncate"><Phone size={12} className="inline mr-1"/>{c.phone}</p>}{c.email&&<p className="text-xs text-slate-500 truncate"><Mail size={12} className="inline mr-1"/>{c.email}</p>}
+      {c.custom_fields?.crm_notes&&<p className="text-xs text-slate-500 line-clamp-2">{String(c.custom_fields.crm_notes)}</p>}
+      <select className="input text-xs py-1" aria-label={`Alterar etapa de ${c.name}`} value={c.crm_stage} onChange={e=>void move(c.id,e.target.value)}>{STAGES.map(st=><option key={st.value} value={st.value}>{st.label}</option>)}</select>
+     </div>)}{!list.length&&<p className="text-xs text-center text-slate-400 p-5">Arraste contatos aqui</p>}</div></div>;
+   })}</div></div>}
+  <Modal open={newOpen} onClose={()=>setNewOpen(false)} title="Nova oportunidade" size="md"><div className="space-y-3"><div><label className="label">Nome *</label><input className="input" value={newLead.name} onChange={e=>setNewLead({...newLead,name:e.target.value})}/></div><div><label className="label">WhatsApp / telefone</label><input className="input" value={newLead.phone} onChange={e=>setNewLead({...newLead,phone:e.target.value})} placeholder="5541999999999"/></div><div><label className="label">E-mail</label><input className="input" value={newLead.email} onChange={e=>setNewLead({...newLead,email:e.target.value})}/></div><div><label className="label">Valor estimado (R$)</label><input className="input" value={newLead.crm_value} onChange={e=>setNewLead({...newLead,crm_value:e.target.value})}/></div><div className="flex justify-end gap-2"><button className="btn-secondary" onClick={()=>setNewOpen(false)}>Cancelar</button><button className="btn-primary" disabled={saving||newLead.name.trim().length<2} onClick={()=>void addLead()}>Criar em Leads</button></div></div></Modal>
+  <Modal open={Boolean(editing)} onClose={()=>setEditing(null)} title={`Oportunidade — ${editing?.name||''}`} size="md"><div className="space-y-3"><div><label className="label">Etapa</label><select className="input" value={editStage} onChange={e=>setEditStage(e.target.value)}>{STAGES.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
+   <div><label className="label">Valor estimado (R$)</label><input className="input" inputMode="decimal" value={editValue} onChange={e=>setEditValue(e.target.value)}/></div>
+   <div><label className="label">Anotações comerciais</label><textarea className="input" rows={4} value={editNotes} onChange={e=>setEditNotes(e.target.value)} placeholder="Próximo passo, proposta, interesse…"/></div>
+   <div className="flex justify-end gap-2"><button className="btn-secondary" onClick={()=>setEditing(null)}>Cancelar</button><button className="btn-primary" disabled={saving} onClick={()=>void save()}>Salvar</button></div></div></Modal>
+ </div>;
 }

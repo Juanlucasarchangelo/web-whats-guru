@@ -13,6 +13,9 @@ import { channelsRouter } from './routes/channels.js';
 import { restoredIntegrationsRouter } from './routes/integrations-restore.js';
 import { errorHandler, wrap } from './http.js';
 import { evolutionWebhookRouter } from './routes/evolution-webhook.js';
+import { operationsRouter } from './routes/operations.js';
+import { profileRouter } from './routes/profile.js';
+import { reportsRouter } from './routes/reports.js';
 
 export function createApp(config) {
   const app = express();
@@ -56,6 +59,9 @@ export function createApp(config) {
       ]);
       res.json({ contacts, conversations, open_conversations: open, messages });
     }));
+    secure.use('/operations', operationsRouter());
+    secure.use('/profile', profileRouter());
+    secure.use('/reports', reportsRouter());
     secure.use('/local', localDataRouter());
     secure.use('/team', teamRouter());
     secure.use('/channels', channelsRouter());

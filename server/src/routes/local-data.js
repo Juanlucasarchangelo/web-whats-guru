@@ -30,7 +30,7 @@ const MODELS = {
   integrations: ['integration', ''],
 };
 const ADMIN_WRITE = new Set(['teams', 'org_members']);
-const NO_WRITE = new Set(['integrations','teams','org_members']);
+const NO_WRITE = new Set(['integrations','teams','org_members','campaigns','campaign_recipients','schedules']);
 const JOINS = {
   conversation_tags: ['conversation_id', 'conversation', 'org_id'],
   contact_tags: ['contact_id', 'contact', 'org_id'],

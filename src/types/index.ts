@@ -182,7 +182,7 @@ export interface Campaign {
   segment_tags: string[];
   segment_stage: string | null;
   scheduled_at: string | null;
-  status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
+  status: 'draft' | 'scheduled' | 'sending' | 'paused' | 'completed' | 'failed';
   consent_required: boolean;
   daily_limit: number;
   sent_count: number;
@@ -215,7 +215,7 @@ export interface Schedule {
   message: string | null;
   scheduled_at: string;
   channel: string;
-  status: 'pending' | 'sent' | 'cancelled' | 'failed';
+  status: 'pending' | 'processing' | 'sent' | 'cancelled' | 'failed' | 'done';
   created_by: string;
   created_at: string;
   contact?: Contact;

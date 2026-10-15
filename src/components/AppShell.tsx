@@ -4,13 +4,13 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, Shield,
+  LogOut, Menu, X, Shield, UserRound,
 } from 'lucide-react';
 
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
   | 'automations' | 'campaigns' | 'schedules' | 'reports'
-  | 'team' | 'settings';
+  | 'team' | 'settings' | 'profile';
 
 interface AppShellProps {
   currentPage: PageId;
@@ -132,6 +132,10 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
 
           {userMenuOpen && (
             <div className="absolute left-3 right-3 bottom-full mb-1 rounded-lg bg-white shadow-lg ring-1 ring-slate-200 py-1 z-10">
+              <button
+                onClick={() => {setUserMenuOpen(false);handleNavigate('profile');}}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              ><UserRound size={16} />Meu perfil</button>
               <button
                 onClick={handleSignOut}
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"

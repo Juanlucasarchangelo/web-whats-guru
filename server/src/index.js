@@ -3,6 +3,7 @@ import { prisma } from './db.js';
 import { createApp } from './app.js';
 import { configureEvolutionWebhook } from './services/evolution.js';
 import { workflowTick } from './services/workflow-engine.js';
+import { operationsTick } from './services/operations-engine.js';
 
 const config = getConfig();
 const app = createApp(config);
@@ -36,8 +37,13 @@ try {
     workflowTick().catch(error => console.error('[Workflow] Erro no agendador:', error.message));
   }, 30000);
   workflowTimer.unref?.();
+  const operationTimer=setInterval(()=>{
+    operationsTick().catch(e=>console.error('[Campanhas/Agendamentos] Erro na fila:',e.message));
+  },30000);
+  operationTimer.unref?.();
   async function shutdown() {
     clearInterval(workflowTimer);
+    clearInterval(operationTimer);
     server.close(async () => { await prisma.$disconnect(); process.exit(0); });
   }
   process.on('SIGINT', shutdown);
