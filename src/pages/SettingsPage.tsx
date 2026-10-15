@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
+import { ChannelsPanel } from '@/components/ChannelsPanel';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
@@ -41,7 +42,7 @@ const INTEGRATION_TYPES = [
 ];
 
 export function SettingsPage() {
-  const { currentOrg } = useOrg();
+  const { currentOrg,currentMembership } = useOrg();
   const orgId = currentOrg?.id;
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -166,11 +167,11 @@ export function SettingsPage() {
     }
   }
 
-  async function handleDisconnectWhatsApp() {
+  async function handleDisconnectWhatsApp(integrationId?: string) {
     if (!orgId) return;
     setWhatsappSaving(true);
     try {
-      await callWhatsAppApi('disconnect', { org_id: orgId });
+      await callWhatsAppApi('disconnect', { org_id: orgId, integration_id: integrationId });
       toastSuccess('WhatsApp desconectado');
       setShowConfigModal(null);
       load();
@@ -206,7 +207,7 @@ export function SettingsPage() {
     if (integ.type === 'whatsapp') {
       setShowConfigModal(integ);
       setConfigType('whatsapp');
-      await handleDisconnectWhatsApp();
+      await handleDisconnectWhatsApp(integ.id);
       return;
     }
     try {
@@ -284,6 +285,7 @@ export function SettingsPage() {
 
       {activeTab === 'integrations' && (
         <div className="space-y-4">
+          <ChannelsPanel canManage={currentMembership?.role==='owner'||currentMembership?.role==='admin'} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type);

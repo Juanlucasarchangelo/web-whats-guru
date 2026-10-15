@@ -73,6 +73,7 @@ export interface Conversation {
   org_id: string;
   contact_id: string;
   channel: string;
+  integration_id?: string | null;
   status: 'open' | 'pending' | 'closed';
   assigned_to: string | null;
   subject: string | null;
