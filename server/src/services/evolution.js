@@ -1,5 +1,7 @@
 import { createHash, createDecipheriv, randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
+import { importEvolutionMessage } from './evolution-inbound.js';
+import { summarizeEvolutionResults } from './evolution-payload.js';
 import { HttpError } from '../http.js';
 
 function decodeKey() {
@@ -33,7 +35,11 @@ async function evolutionGet(api,path,method='GET',body) {
  try {response=await fetch(`${api.url}${path}`,{method,headers:{apikey:api.apiKey,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000),redirect:'error'});}
  catch {throw new HttpError(502,'Nao foi possivel comunicar com Evolution API. Confira Docker e porta.');}
  const data=await response.json().catch(()=>({}));
- if(!response.ok)throw new HttpError(502,`Evolution retornou HTTP ${response.status}: ${String(data?.response?.message||data?.message||'erro').slice(0,120)}`);
+ if(!response.ok){
+   const error=new HttpError(502,`Evolution retornou HTTP ${response.status}: ${String(data?.response?.message||data?.message||'erro').slice(0,120)}`);
+   error.providerStatus=response.status;
+   throw error;
+ }
  return data;
 }
 export async function syncEvolutionStatus(orgId) {
@@ -62,4 +68,91 @@ export async function sendEvolutionText({orgId,conversation,text,userId}) {
   return msg;
  });
  return row;
+}
+
+/** Evolution API v2 expects FLAT webhook settings, not {webhook:{...}}. */
+export async function configureEvolutionWebhook(orgId, endpointUrl) {
+ const api = await loadEvolution(orgId);
+ if (!api) throw new HttpError(404, 'Evolution nao configurada nesta organizacao.');
+ const parsed = new URL(endpointUrl);
+ if (!['https:', 'http:'].includes(parsed.protocol)) throw new HttpError(400, 'Webhook deve usar HTTP(S).');
+ const body = {
+   enabled: true,
+   url: endpointUrl,
+   webhookByEvents: false,
+   webhookBase64: false,
+   events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'MESSAGES_UPDATE'],
+ };
+ let contract = 'flat';
+ try {
+   // Recent Evolution endpoints may accept this shape.
+   await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', body);
+ } catch (error) {
+   // Some Evolution v2 releases explicitly require { webhook: {...} }.
+   if (![400, 404, 422].includes(error?.providerStatus)) throw error;
+   contract = 'nested';
+   await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', { webhook: body });
+ }
+ let verified = false;
+ try {
+   const status = await getEvolutionWebhookInfo(orgId);
+   verified = Boolean(status?.enabled && status?.has_url && status?.messages_upsert);
+ } catch (error) {
+   console.warn('[Evolution Webhook] Registro aceito, mas falhou a verificacao de leitura:', error.message);
+ }
+ if (!verified) console.warn('[Evolution Webhook] Confirme no painel Evolution se o webhook esta habilitado.', {instance:api.instance,contract});
+ else console.info('[Evolution Webhook] Registro confirmado:', { instance: api.instance, contract, events: body.events });
+ return { ok: true, verified, instance: api.instance, contract, events: body.events };
+}
+
+export async function getEvolutionWebhookInfo(orgId) {
+ const api = await loadEvolution(orgId);
+ if (!api) return null;
+ const result = await evolutionGet(api, `/webhook/find/${encodeURIComponent(api.instance)}`);
+ const config = result?.webhook?.webhook ?? result?.webhook ?? result?.data?.webhook ?? result?.data ?? result;
+ const events = Array.isArray(config?.events) ? config.events : [];
+ // Do NOT expose webhook URL (it contains the secret), access token or API key.
+ return {
+   instance: api.instance,
+   enabled: Boolean(config?.enabled),
+   has_url: Boolean(config?.url),
+   events,
+   messages_upsert: events.some(e => String(e).toUpperCase() === 'MESSAGES_UPSERT'),
+ };
+}
+
+function extractHistoryRecords(result) {
+ if (Array.isArray(result)) return result;
+ const candidates = [result?.messages?.records, result?.messages, result?.data?.messages?.records,
+   result?.data?.messages, result?.data?.records, result?.records, result?.data];
+ for (const value of candidates) if (Array.isArray(value)) return value;
+ throw new HttpError(502, 'Formato inesperado no historico da Evolution. Confira a versao da API e seus logs.');
+}
+
+/** Recovery path when Docker cannot deliver webhooks: import the open conversation's recent messages. */
+export async function syncEvolutionConversation({ orgId, conversation }) {
+ const api = await loadEvolution(orgId);
+ if (!api) throw new HttpError(404, 'Evolution nao configurada.');
+ const contact = await prisma.contact.findFirst({
+   where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true },
+ });
+ const phone = String(contact?.phone ?? '').replace(/\D/g, '');
+ if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato sem numero WhatsApp valido para sincronizar.');
+ const remoteJid = `${phone}@s.whatsapp.net`;
+ const data = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {
+   where: { key: { remoteJid } }, page: 1, offset: 50,
+ });
+ let items = extractHistoryRecords(data);
+ let fallback_used = false;
+ if (items.length === 0) {
+   // Certain Evolution releases ignore /chat/findMessages remoteJid filters.
+   const fallback = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {page: 1, offset: 50});
+   items = extractHistoryRecords(fallback);
+   fallback_used = true;
+ }
+ const results = [];
+ for (const item of items) results.push(await importEvolutionMessage({ orgId, item, expectedPhone: phone }));
+ const counts = summarizeEvolutionResults(results);
+ console.info('[Evolution Sync]', { instance: api.instance, conversationId: conversation.id, total: items.length, fallback_used, counts });
+ return { counts, scanned: items.length, fallback_used, synchronized_at: new Date().toISOString() };
 }

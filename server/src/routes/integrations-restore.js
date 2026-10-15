@@ -4,7 +4,7 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
-import { syncEvolutionStatus } from '../services/evolution.js';
+import { syncEvolutionStatus, getEvolutionWebhookInfo, configureEvolutionWebhook } from '../services/evolution.js';
 
 const key = () => {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -62,6 +62,34 @@ export function restoredIntegrationsRouter(){
  const router=Router();
  router.get('/',wrap(async(req,res)=>{try{await syncEvolutionStatus(req.orgId);}catch(error){console.warn('Evolution status:',error.message);}const data=await prisma.integration.findMany({where:{org_id:req.orgId}});res.json({data:data.map(i=>({...i,config:i.config??{}}))});}));
  router.get('/whatsapp/status',wrap(async(req,res)=>{const state=await syncEvolutionStatus(req.orgId);if(!state)throw new HttpError(404,'Nenhuma Evolution configurada nesta organizacao.');res.json(state);}));
+ router.get('/whatsapp/diagnostics',wrap(async(req,res)=>{
+   const integration=await prisma.integration.findFirst({where:{org_id:req.orgId,type:'whatsapp'}});
+   if(!integration)throw new HttpError(404,'WhatsApp nao configurado nesta organizacao.');
+   let webhook=null, webhook_error=null;
+   if(integration.config?.provider==='evolution_api'){
+     try{webhook=await getEvolutionWebhookInfo(req.orgId);}catch(error){webhook_error=error.message;console.warn('[Evolution Diagnostics]',{org_id:req.orgId,error:error.message});}
+   }
+   const lastEvent=await prisma.webhookEvent.findFirst({
+     where:{org_id:req.orgId,source:'evolution_inbound'},orderBy:{received_at:'desc'},
+     select:{received_at:true,processed:true,event_type:true,error:true,payload:true}
+   });
+   res.json({provider:integration.config?.provider??'unknown',status:integration.status,
+     webhook_configured_in_server:Boolean(process.env.EVOLUTION_WEBHOOK_PUBLIC_URL && process.env.EVOLUTION_WEBHOOK_SECRET?.length>=32),
+     webhook,webhook_error,last_event:lastEvent?{
+       received_at:lastEvent.received_at,processed:lastEvent.processed,event_type:lastEvent.event_type,
+       error:lastEvent.error,counts:lastEvent.payload?.counts??null}:null});
+ }));
+ router.post('/whatsapp/reconfigure-webhook',wrap(async(req,res)=>{
+   checkAdmin(req);
+   const publicUrl=process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim().replace(/\/$/,'');
+   const secret=process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
+   if(!publicUrl || !/^https?:\/\//.test(publicUrl)||!secret||secret.length<32)
+     throw new HttpError(400,'Configure EVOLUTION_WEBHOOK_PUBLIC_URL e EVOLUTION_WEBHOOK_SECRET (min. 32 caracteres) no server/.env.');
+   const url=`${publicUrl}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
+   const configured=await configureEvolutionWebhook(req.orgId,url);
+   const webhook=await getEvolutionWebhookInfo(req.orgId).catch(error=>({verification_error:error.message}));
+   res.json({configured:configured.ok,instance:configured.instance,webhook});
+ }));
  router.get('/activity',wrap(async(req,res)=>{const [audit,events]=await Promise.all([prisma.auditLog.findMany({where:{org_id:req.orgId},orderBy:{created_at:'desc'},take:50}),prisma.webhookEvent.findMany({where:{org_id:req.orgId},orderBy:{received_at:'desc'},take:50})]);res.json({audit,events});}));
  router.post('/whatsapp',wrap(async(req,res)=>{
   checkAdmin(req);const {action}=req.body||{};
