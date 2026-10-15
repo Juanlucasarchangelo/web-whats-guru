@@ -1,339 +1,199 @@
 <div align="center">
-  <img src="https://media.giphy.com/media/Ll22OhMLAlVDb8UQWe/giphy.gif" width="120" alt="Ilustração" />
-  <h1>💬 Converso — CRM Multicanal</h1>
-  <p>Plataforma web de atendimento, caixa de entrada, contatos, CRM, chatbots, campanhas e automações.</p>
-  <p>
-    <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?style=for-the-badge" alt="Frontend" />
-    <img src="https://img.shields.io/badge/Backend-Supabase%20Edge%20Functions-3ECF8E?style=for-the-badge" alt="Backend" />
-    <img src="https://img.shields.io/badge/Banco-PostgreSQL-4169E1?style=for-the-badge" alt="Banco" />
-  </p>
+  <img src="https://media.giphy.com/media/Ll22OhMLAlVDb8UQWe/giphy.gif" width="120" alt="Whats-Guru" />
+  <h1>💬 Whats-Guru</h1>
+  <p>Plataforma de atendimento WhatsApp, caixa de entrada, contatos, CRM e automações para equipes.</p>
+
+  <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?style=for-the-badge" alt="React + TypeScript" />
+  <img src="https://img.shields.io/badge/Backend-Node.js%20%2B%20Express-43853D?style=for-the-badge" alt="Node.js + Express" />
+  <img src="https://img.shields.io/badge/Banco-MySQL-4479A1?style=for-the-badge" alt="MySQL" />
+  <img src="https://img.shields.io/badge/WhatsApp-Evolution%20API-25D366?style=for-the-badge" alt="Evolution API" />
 </div>
 
----
+📖 Visão Geral
+O Whats-Guru (nome interno herdado do código: Converso) é uma plataforma web responsiva de atendimento multicanal e CRM, criada originalmente no Bolt.new e posteriormente migrada para execução independente em ambiente local.
+O sistema reúne dashboard, caixa de entrada, contatos, funil CRM (Kanban), chatbots, automações, campanhas, agendamentos, relatórios, equipes e integrações. O objetivo da migração foi preservar a interface e os fluxos do projeto original, substituindo a infraestrutura Supabase por uma API própria e um banco MySQL.
+A versão local utiliza React + TypeScript + Vite no frontend, Node.js + Express na API, Prisma ORM para acessar o MySQL e JWT na autenticação. O WhatsApp pode ser configurado nas modalidades API oficial da Meta e API não oficial via Evolution API. A Evolution pode estar em um contêiner Docker, com instância configurada pelo painel de Integrações.
+Situação atual: login, conexão da API com MySQL (24/24 tabelas) e conexão de uma instância Evolution (state: open) foram confirmados durante a implantação local. O usuário relatou que a implementação está funcionando, mas ainda há ajustes pendentes. Isso não comprova todos os fluxos de recebimento, campanhas, chatbots, automações ou publicação em produção.
 
-## 📖 Visão Geral
+Supabase: o arquivo src/lib/supabase.ts permanece como adaptador de compatibilidade para páginas que usam a sintaxe antiga supabase.from(...); na versão migrada analisada, ele chama a API local. A dependência @supabase/supabase-js e arquivos legados do projeto podem permanecer no repositório, mas não são o banco operacional desta arquitetura. Não remover esses arquivos sem verificar importações e compilar novamente.
 
-O **Converso** é um projeto de plataforma web responsiva, criado no **Bolt.new** como uma aplicação de atendimento multicanal e CRM inspirada em soluções como o ChatGuru. O nome **Converso** aparece na tela de login, menu e migrações; o `package.json` ainda utiliza o nome técnico original `vite-react-typescript-starter`.
-
-O sistema reúne **dashboard, caixa de entrada, contatos, funil CRM (Kanban), construção visual de chatbots, automações, campanhas, agendamentos, relatórios, equipes e configurações de integrações**.
-
-A interface está implementada em **React + TypeScript + Vite**, com **Tailwind CSS** e ícones **Lucide React**. Os dados são acessados pelo cliente `@supabase/supabase-js`, com **PostgreSQL e autenticação do Supabase**. Três funções de backend usam **Deno/TypeScript no Supabase Edge Functions**. Não existem Next.js, Express, Prisma, MySQL ou API Node própria neste ZIP.
-
-A identidade visual atual usa **azul, branco, cinza e tons escuros**. O projeto inclui um `dist/` de build já gerado; a referência para alterações é sempre `src/`.
-
-> **Estado do projeto:** diversas telas e operações de banco estão implementadas, mas partes essenciais de envio de WhatsApp, execução de chatbots/automações, campanhas e agendamentos **não foram implementadas de ponta a ponta**. A existência de código de conexão não comprova que o serviço remoto esteja ativo.
-
----
-
-## 🎯 Objetivos
-
-- Centralizar atendimentos em uma caixa de entrada associada a contatos.
-- Organizar contatos, etiquetas e etapas de negociação em um CRM Kanban.
-- Registrar e consultar mensagens, anotações internas e respostas rápidas.
-- Administrar atendentes, equipes, papéis e organizações.
-- Projetar fluxos de chatbot e regras de automação.
-- Criar campanhas segmentadas e agendar ações.
-- Apresentar indicadores de atendimento, mensagens e oportunidades.
-- Integrar o sistema ao WhatsApp Business Platform, a um provedor do tipo Evolution API e à OpenAI.
-- Receber e registrar webhooks de mensagens de entrada do WhatsApp oficial.
-- Proteger dados por autenticação, papéis e políticas de acesso (RLS).
-- Oferecer uma interface adaptável a computadores e celulares.
-- **Próxima etapa:** concluir as rotinas operacionais e corrigir as pendências de segurança e banco antes da produção.
-
----
-
-## 🚀 Tecnologias Utilizadas
-
+🎯 Objetivos
+- Centralizar atendimentos e conversas de WhatsApp em uma caixa de entrada.
+- Organizar contatos, etiquetas e oportunidades em CRM Kanban.
+- Integrar o WhatsApp oficial (Meta) e o não oficial (Evolution API), preservando ambas as opções.
+- Consultar histórico de mensagens e registrar informações de atendimento.
+- Gerenciar organizações, membros, equipes e permissões.
+- Criar fluxos de chatbot e regras de automação.
+- Preparar campanhas segmentadas e agendamentos.
+- Exibir relatórios e indicadores de operação.
+- Manter os dados do sistema em MySQL gerenciado pela API Node.js.
+- Desenvolver localmente e preparar publicação online posteriormente.
+🚀 Tecnologias Utilizadas
 <div align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" height="30" alt="React" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" height="30" alt="TypeScript" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" height="30" alt="Vite" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" height="30" alt="Node.js, ferramenta de desenvolvimento" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/supabase/supabase-original.svg" height="30" alt="Supabase" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" height="30" alt="PostgreSQL" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" height="30" alt="Node.js" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/express/express-original.svg" height="30" alt="Express" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" height="30" alt="MySQL" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prisma/prisma-original.svg" height="30" alt="Prisma" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/tailwindcss/tailwindcss-original.svg" height="30" alt="Tailwind CSS" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/denojs/denojs-original.svg" height="30" alt="Deno" />
 </div>
 
-| Camada | Tecnologia identificada | Origem |
-|---|---|---|
-| Frontend | React `^18.3.1`, React DOM | `package.json`, `src/` |
-| Linguagem | TypeScript `^5.5.3` / TSX | `package.json`, `src/**/*.tsx` |
-| Build e desenvolvimento | Vite `^5.4.2` | `vite.config.ts`, `package.json` |
-| Estilo | Tailwind CSS `^3.4.1`, PostCSS, Autoprefixer | `src/index.css`, configurações |
-| Ícones | Lucide React `^0.446.0` | `package.json` |
-| Autenticação e dados | Supabase JS `^2.57.4` | `src/lib/supabase.ts` |
-| Banco remoto | PostgreSQL (serviço Supabase) | `supabase/migrations/*.sql` |
-| Backend de integração | Supabase Edge Functions — Deno/TypeScript | `supabase/functions/` |
-| Ambiente de desenvolvimento | Node.js + npm | scripts Vite no `package.json` |
-| SQL | PostgreSQL / PL/pgSQL, com Row Level Security (RLS) | migrações |
+Camada	Tecnologia	Observação
+Frontend	React 18, TypeScript, Vite 5	Interface web responsiva
+UI	Tailwind CSS, Lucide React	Preservação da interface original
+Backend	Node.js, Express 5	API REST em server/
+Banco	MySQL	Banco local converso_local
+ORM	Prisma 6.19.3	Mapeamento das 24 tabelas
+Autenticação	JWT, bcryptjs	Conta e sessão gerenciadas pela API local
+Integração WhatsApp não oficial	Evolution API	Instância no Docker e API key do provedor
+Integração WhatsApp oficial	Meta WhatsApp Business Platform	Caminho separado, sujeito às credenciais oficiais
+Segurança/API	Helmet, CORS, rate limiting, Zod	Proteções implementadas no backend
 
-**Não utilizados neste projeto:** Next.js, Express, Prisma e MySQL. **Node.js é utilizado para desenvolver e compilar o frontend**, não como um servidor REST Express próprio.
 
----
-
-## 🚀 Funcionalidades
-
-As marcações `[x]` significam **implementação localizada no código** (sem comprovação de funcionamento contra o serviço remoto); `[ ]` indica operação inexistente, incompleta ou que requer correção.
-
-- [x] Cadastro, login e logout com e-mail/senha via Supabase Auth.
-- [x] Sessão persistente e renovação automática de token.
-- [x] Perfis de organização `owner`, `admin` e `agent`.
-- [x] Estrutura de perfil no banco: nome, avatar e telefone; a interface própria de edição de perfil não está presente.
-- [x] Dashboard com indicadores consultados nas tabelas do Supabase.
-- [x] Caixa de entrada com conversas, histórico, pesquisa e filtros.
-- [x] Registro de mensagens de atendente no banco e assinatura Realtime da caixa de entrada.
-- [x] Alteração de status de conversas, atribuição, notas e etiquetas.
-- [x] Cadastro, edição e exclusão de contatos.
-- [x] CRM Kanban com mudança de etapa e valor de oportunidade.
-- [x] Editor de fluxos de chatbot, com gravação, edição e ativação visual.
-- [x] Cadastro de gatilhos e ações de automações.
-- [x] Cadastro de campanhas e criação de registros de destinatários.
-- [x] Cadastro e cancelamento de agendamentos.
-- [x] Relatórios básicos calculados a partir dos dados cadastrados.
-- [x] Gerenciamento parcial de equipes, permissões e usuários já associados.
-- [x] Configuração de integração WhatsApp oficial, Evolution API, OpenAI e URL de webhook.
-- [x] Função de recebimento de mensagens **do WhatsApp oficial** via webhook (depende de deploy e credenciais).
-- [x] Estrutura de 23 tabelas, políticas RLS e 10 arquivos de migração SQL.
-- [ ] Envio de mensagens **para o WhatsApp** quando o atendente clica em enviar (hoje o frontend grava no banco).
-- [ ] Execução automática dos fluxos de chatbot salvos.
-- [ ] Motor para executar os gatilhos/ações das automações.
-- [ ] Disparo real de campanhas e atualização confiável de entrega/leitura (o clique atual cria destinatários e muda contadores).
-- [ ] Execução efetiva dos envios em horários agendados (não há worker/cron de disparo).
-- [ ] Convite real por e-mail para novos atendentes (a tela exibe mensagem informativa).
-- [ ] Tela própria de edição de perfil e fluxo de recuperação de senha no frontend.
-- [ ] Sincronização completa de status de mensagens do WhatsApp e cobertura de eventos webhook.
-- [ ] Tratamento completo do QR Code da integração não oficial (a função inicia conexão, mas não confirma pareamento).
-- [ ] Resolver a divergência entre criação de organização compartilhada e individual nas migrações.
-- [ ] Corrigir e testar a função `seed_demo_data`, cujo SQL tem comandos `RETURNING` inconsistentes com múltiplas linhas.
-- [ ] Testes automatizados, validação operacional do banco remoto e revisão de segurança para produção.
-
-**Atenção:** a função `seed_demo_data(uuid)` está definida no SQL, mas não há chamada a ela em `src/`. O projeto **não cria automaticamente uma conta de administrador com senha fixa**.
-
----
-
-## 🏗 Arquitetura do Sistema
-
+Não usamos Supabase/PostgreSQL como banco operacional desta versão. O Supabase fazia parte da arquitetura original; arquivos e nomes herdados podem continuar no código apenas para compatibilidade ou histórico.
+🚀 Funcionalidades
+As marcações [x] indicam implementação identificada e/ou validação relatada na instalação local. [ ] indica fluxo ainda pendente de confirmação integral ou trabalho adicional; não confundir existência de tela com operação completa.
+- [x] Cadastro e login local com e-mail e senha.
+- [x] Sessão autenticada por JWT e logout.
+- [x] Organização e associação de usuários por papéis (owner, admin, agent).
+- [x] Dashboard com indicadores consultados na API local.
+- [x] Cadastro e consulta de contatos no MySQL (testados no ambiente local).
+- [x] Estrutura de caixa de entrada com conversas e mensagens.
+- [x] Estrutura de CRM Kanban, etiquetas, etapas e oportunidades.
+- [x] Telas de chatbots, automações, campanhas e agendamentos preservadas na migração.
+- [x] Telas de relatórios e equipes.
+- [x] Integração configurável com Evolution API e API oficial da Meta.
+- [x] Geração de QR Code da Evolution na interface (confirmada pelo usuário).
+- [x] Instância Evolution whats-guru respondendo open em teste direto.
+- [x] API local conectada ao banco converso_local, com 24/24 tabelas confirmadas.
+- [ ] Validação automatizada e abrangente de envio e recebimento pela Evolution em diferentes cenários e reinícios.
+- [ ] Validar webhook de entrada e atualização de status de mensagens na operação real.
+- [ ] Testar de ponta a ponta integração com API oficial da Meta.
+- [ ] Validar execução de chatbots, automações, campanhas e agendamentos (não apenas seus cadastros).
+- [ ] Verificar permissões por organização e cobertura de testes de regressão.
+- [ ] Revisão de segurança, backup, HTTPS, logs e preparação para produção.
+🏗 Arquitetura do Sistema
 ```mermaid
 flowchart TD
-    A["Navegador - React / TypeScript / Vite"] --> B["Supabase JS Client"]
-    B --> C["Supabase Auth - Email/Senha"]
-    B --> D["Supabase API - PostgREST e Realtime"]
-    D --> E["PostgreSQL + RLS"]
-    A --> F["Edge Functions - Deno / TypeScript"]
-    F --> E
-    F --> G["Meta Graph API / WhatsApp"]
-    F --> H["Evolution API - QR Code"]
-    F --> I["OpenAI - Validação de chave"]
-    G --> J["Webhook Handler"]
-    J --> E
+    A["Frontend - React / TypeScript / Vite"] --> B["API local - Node.js / Express"]
+    B --> C["Autenticacao JWT"]
+    B --> D["Prisma ORM"]
+    D --> E["MySQL - converso_local"]
+    B --> F["Integracoes WhatsApp"]
+    F --> G["Evolution API - Docker"]
+    F --> H["Meta WhatsApp Business Platform"]
+    G --> I["WhatsApp"]
+    H --> I
+    G -. "Webhooks / eventos a validar" .-> B
 ```
-
-**Estrutura real do ZIP (pasta `project/`):**
-
-```text
-project/
-├── .bolt/                  # Template e prompt usados pelo Bolt
-├── .env                    # URL e chave pública do Supabase (não publicar)
-├── .gitignore              # Exclui .env, node_modules e dist do Git
-├── dist/                   # Build estático já gerado; não é o código-fonte
-├── index.html              # Página HTML de entrada
-├── package.json            # Dependências e comandos npm
-├── package-lock.json       # Dependências travadas
-├── vite.config.ts          # Vite e alias @ -> src/
-├── tailwind.config.js      # Configuração do Tailwind
-├── postcss.config.js       # Configuração do PostCSS
-├── eslint.config.js        # Verificação estática
-├── tsconfig*.json          # Configurações TypeScript
-├── src/
-│   ├── App.tsx             # Orquestra autenticação e páginas
-│   ├── main.tsx            # Ponto de entrada React
-│   ├── index.css           # Tema visual e estilos
-│   ├── components/         # Menu, shell, modal, alertas e componentes UI
-│   ├── contexts/           # AuthContext e OrgContext
-│   ├── lib/supabase.ts     # Criação do cliente Supabase
-│   ├── pages/              # 12 páginas TSX: login + 11 módulos internos
-│   ├── types/index.ts      # Tipos das entidades
-│   └── vite-env.d.ts       # Tipagem do Vite
-└── supabase/
-    ├── config.toml         # Configuração de autenticação das Edge Functions
-    ├── functions/
-    │   ├── whatsapp-api/   # Conectar/desconectar integrações WhatsApp
-    │   ├── webhook-handler/# Receber webhooks oficiais da Meta
-    │   └── integration-api/# Configuração de OpenAI e webhooks
-    └── migrations/         # 10 migrações SQL do banco
-```
-
-**Banco de dados:** 23 tabelas definidas nos arquivos SQL:
-
-`organizations`, `org_members`, `teams`, `team_members`, `contacts`, `tags`, `contact_tags`, `conversations`, `conversation_tags`, `messages`, `internal_notes`, `quick_replies`, `attachments`, `chatbots`, `automations`, `campaigns`, `campaign_recipients`, `schedules`, `audit_logs`, `integrations`, `webhook_events`, `user_profiles` e `integration_credentials`.
-
-**Projeto Supabase configurado no ZIP:** `jnlnbotqjjugtppggorb`, endpoint `https://jnlnbotqjjugtppggorb.supabase.co`. A URL identifica o projeto remoto **configurado**, não confirma banco operacional ou autorização de acesso. A senha PostgreSQL, chave `service_role` e contas existentes **não aparecem no ZIP**.
-
-> **Segurança:** `integration_credentials` restringe acesso do navegador por RLS e permissões. Os tokens estão armazenados em colunas `text`; não há criptografia adicional de segredo implementada no código analisado. A validação de assinatura do webhook oficial só é exigida se `app_secret` tiver sido configurado. As três Edge Functions usam `verify_jwt = false` e, quando necessário, validam o usuário dentro do código.
-
----
-
-## 📦 Instalação
-
-### 1. Pré-requisitos
-
+Estrutura principal:
+whats-guru/
+├── src/                        # Frontend React / TypeScript
+│   ├── pages/                  # Dashboard, Inbox, Contatos, CRM, Integrações etc.
+│   ├── components/             # Componentes de interface
+│   ├── contexts/               # Sessão e organização
+│   └── lib/
+│       ├── api.ts              # Cliente da API Node local
+│       └── supabase.ts         # Adaptador legado -> API local (não banco Supabase)
+├── server/                     # Backend próprio
+│   ├── src/
+│   │   ├── index.js            # Inicialização da API
+│   │   ├── app.js              # Express e montagem das rotas
+│   │   ├── routes/             # Autenticação, contatos, conversas, integrações etc.
+│   │   ├── services/           # Comunicação com provedores WhatsApp
+│   │   └── middleware/         # Autorização e contexto de organização
+│   ├── prisma/schema.prisma    # Modelos Prisma para MySQL
+│   ├── scripts/                # Ferramentas de validação do banco
+│   ├── .env                    # Configurações privadas (não versionar)
+│   └── package.json
+├── supabase/                   # Legado da exportação Bolt (não necessário ao banco atual)
+├── .env                        # Configuração do frontend; revisar antes de publicar
+├── package.json                # Scripts frontend
+└── vite.config.ts
+Banco de dados: MySQL converso_local, com 24 tabelas verificadas. A tabela users foi acrescentada para autenticação própria, substituindo a dependência do Supabase Auth. O banco também contém organizações, membros, contatos, conversas, mensagens, integrações e credenciais de integração. A conexão Evolution é externa ao MySQL; o MySQL armazena informações e configurações, enquanto o serviço Evolution se comunica com o WhatsApp.
+📦 Instalação
+1. Pré-requisitos
 Instale:
-
-- [Node.js](https://nodejs.org/) — recomendado Node.js 20 ou 22, com npm.
-- [Git](https://git-scm.com/downloads) — útil **caso** o projeto seja colocado em repositório Git.
-- [VS Code](https://code.visualstudio.com/) — recomendado para editar o código.
-- [Conta Supabase](https://supabase.com/dashboard) com permissão sobre o projeto remoto, se for configurar banco/funções.
-- [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started) — **somente** para gerenciar migrações, projeto remoto e deploy de funções.
-
-**Não é necessário instalar MySQL, PostgreSQL local, Prisma nem Express para executar o frontend apontando para o Supabase remoto.** Para um ambiente Supabase totalmente local, são necessários outros procedimentos (incluindo Docker), não configurados neste ZIP.
-
-### 2. Baixar o projeto
-
-O arquivo fornecido já contém o código-fonte. **Extraia o ZIP** e abra o terminal dentro da pasta `project` (onde está o `package.json`):
-
-```bash
-cd project
-```
-
-Se futuramente houver um repositório Git, poderá ser usado `git clone <URL_DO_REPOSITORIO>`. **Nenhum endereço de repositório foi informado ou encontrado** neste projeto.
-
-### 3. Instalar as dependências
-
-```bash
-npm ci
-```
-
-`npm ci` utiliza as versões resolvidas no `package-lock.json`. Alternativamente:
-
-```bash
+- Node.js — Node.js 20.19+; ambiente já testado com v24.21.0 e npm 11.19.0.
+- Git — recomendado para versionamento.
+- MySQL Server e MySQL Workbench — banco local.
+- VS Code — recomendado.
+- Docker Desktop — caso a Evolution API rode em contêiner no próprio computador.
+- Instância Evolution API configurada, para atendimento por WhatsApp não oficial.
+2. Baixar o projeto
+Clone um repositório privado, se existir, ou utilize a pasta local do projeto:
+git clone <URL_DO_REPOSITORIO>
+cd whats-guru
+No computador em que o projeto foi configurado: C:\Users\ImportsBR-PC1\Documents\Projetos\whats-guru. Não há URL de repositório confirmada nesta documentação.
+3. Instalar as dependências
+Frontend — dentro de whats-guru/:
 npm install
-```
+Backend — dentro de whats-guru/server/:
+cd server
+npm install
+npm run db:validate
+npm run db:generate
+As duas pastas possuem arquivos package.json distintos. Execute npm na pasta correspondente.
 
-Comandos existentes no `package.json`:
-
-```bash
-npm run dev       # Inicia servidor Vite
-npm run build     # Gera o site para produção em dist/
-npm run preview   # Pré-visualiza dist/
-npm run typecheck # Verifica tipos TypeScript
-npm run lint      # Executa ESLint
-```
-
-### 4. Configurar as variáveis de ambiente
-
-O projeto já tem um arquivo **`project/.env`**, com duas variáveis:
-
-```env
-VITE_SUPABASE_URL=https://jnlnbotqjjugtppggorb.supabase.co
-VITE_SUPABASE_ANON_KEY=<COPIAR_O_VALOR_DO_ARQUIVO_.env_ORIGINAL_OU_DO_DASHBOARD>
-```
-
-A `VITE_SUPABASE_ANON_KEY` **está presente no ZIP**, mas foi omitida deste README, que pode ser publicado. Ela é uma **chave pública de acesso da aplicação** (papel `anon`), e **não** uma senha administrativa do PostgreSQL, token de serviço nem login de usuário.
-
-Para consultar/gerenciar o projeto, acesse o [Dashboard do Supabase](https://supabase.com/dashboard/project/jnlnbotqjjugtppggorb) com uma conta que já tenha permissão. A URL de banco e a chave pública também podem ser encontradas nas configurações do projeto no dashboard.
-
-O código `src/lib/supabase.ts` usa essas variáveis para criar o cliente, persistir a sessão e renovar tokens.
-
-**Nunca coloque `SUPABASE_SERVICE_ROLE_KEY`, senha do PostgreSQL, tokens da Meta, chave OpenAI ou outros segredos em variáveis `VITE_*`.** Variáveis `VITE_*` ficam expostas ao navegador na compilação.
-
-Para integrações:
-
-- **WhatsApp oficial:** informe `phone_number_id`, `business_account_id`, `access_token` e, para validar webhooks com segurança, `app_secret` na interface de Configurações.
-- **Evolution API:** informe URL HTTPS do provedor, nome da instância e `api_key` na interface.
-- **OpenAI:** informe sua chave API na interface de Configurações; a função a verifica usando a API de modelos.
-- **Webhook externo:** informe a URL HTTPS pela interface.
-- **Edge Functions:** usam as variáveis de ambiente do Supabase `SUPABASE_URL`, `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` **no ambiente de servidor**. Seus valores de servidor não estão no ZIP.
-
-### 5. Preparar o banco de dados
-
-O sistema usa **PostgreSQL hospedado no Supabase**. Não há comandos `npm run db:generate`, `db:push` ou `db:seed` no `package.json`, e **não existe Prisma**.
-
-O ZIP contém **10 migrações SQL**, em `supabase/migrations`, para criar as tabelas e as funções `create_organization`, `seed_demo_data` e `handle_new_user_auto_provision`.
-
-Se você **já utiliza** o projeto remoto `jnlnbotqjjugtppggorb`, **não reaplique automaticamente as migrações** sem verificar histórico, permissões e backup. Para inspecionar com a Supabase CLI:
-
-```bash
-npx supabase login
-npx supabase link --project-ref jnlnbotqjjugtppggorb
-npx supabase migration list
-```
-
-Depois de **revisar e corrigir as migrações** e preferencialmente validar em ambiente de testes, a aplicação delas pode ser feita com:
-
-```bash
-npx supabase db push
-```
-
-**Pendências detectadas antes de qualquer `db push`:** a migração `007` implementa organização compartilhada, enquanto a última migração implementa organização por novo usuário; `006` utiliza `unaccent` sem instalação explícita da extensão no ZIP; `005` usa `RETURNING id INTO` incorretamente em inserções com múltiplos registros. Inspecione também políticas RLS e permissões antes da produção.
-
-Para publicar as três funções, com um projeto corretamente vinculado e permissões de deploy:
-
-```bash
-npx supabase functions deploy whatsapp-api
-npx supabase functions deploy webhook-handler
-npx supabase functions deploy integration-api
-```
-
-O arquivo `supabase/config.toml` declara `verify_jwt = false` para as três funções. Elas precisam de suas próprias verificações de autorização e, para o webhook público, validação de assinatura. **Deploy não configura automaticamente os serviços Meta/OpenAI nem habilita envios de WhatsApp.**
-
-A função de dados demonstrativos pode ser chamada manualmente após correção, mas **não é executada pelo frontend** e **não cria usuário administrador**.
-
-### 6. Iniciar o projeto
-
-Na pasta `project/`, execute:
-
-```bash
+4. Configurar as variáveis de ambiente
+No frontend (whats-guru/.env), configure o endereço da API:
+VITE_API_URL=http://127.0.0.1:4000
+No backend (whats-guru/server/.env):
+NODE_ENV=development
+HOST=127.0.0.1
+PORT=4000
+DATABASE_URL="mysql://converso_app:SENHA_LOCAL@127.0.0.1:3306/converso_local"
+JWT_SECRET="SEGREDO_LONGO_ALEATORIO"
+JWT_EXPIRES_IN=12h
+ALLOW_REGISTRATION=true
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+INTEGRATION_ENCRYPTION_KEY="CHAVE_DE_CRIPTOGRAFIA_EXISTENTE"
+EVOLUTION_ALLOW_LOCAL_HTTP=true
+Atenção: exemplos acima contêm marcadores, não credenciais reais. Preserve a INTEGRATION_ENCRYPTION_KEY que já está em uso: alterá-la pode impedir a leitura das credenciais de integrações existentes. No ambiente local, EVOLUTION_ALLOW_LOCAL_HTTP=true foi usado para permitir Evolution em loopback, como http://127.0.0.1:8080; confira a versão instalada antes de configurar.
+Se a senha MySQL contiver caracteres reservados como @, #, : ou /, codifique-os na URL. Jamais inclua credenciais em arquivos versionados no Git. Não use variáveis VITE_ para segredos, pois ficam acessíveis no navegador.
+5. Preparar o banco de dados
+O banco utilizado é MySQL, não Supabase.
+O banco converso_local e as 24 tabelas já foram criados no ambiente de desenvolvimento. Para validar a conexão existente, execute na pasta server:
+npm run db:validate
+npm run db:generate
+npm run db:check
+Resultado confirmado nessa instalação:
+Banco: converso_local | Tabelas: 24/24
+OK: conexao MySQL e estrutura base presentes.
+Para uma instalação nova, utilize o script SQL da Etapa 2 da migração e configure um usuário MySQL com permissões apenas no banco da aplicação. Não execute novamente scripts de criação sem revisar o estado do banco e efetuar backup. prisma generate cria o cliente JavaScript; não cria sozinho as tabelas.
+6. Iniciar o projeto
+Abra dois terminais.
+Terminal 1 — API:
+cd server
 npm run dev
-```
-
-O Vite, sem alteração de configuração, inicia normalmente em:
-
-**http://localhost:5173**
-
-Em outro terminal, para uma verificação estática e build:
-
-```bash
+Acesse http://127.0.0.1:4000/api/health. Resposta confirmada no ambiente local:
+{"api":"online","mysql":"connected","tables":24,"expected_tables":24}
+Terminal 2 — Frontend: abra outro terminal na pasta raiz whats-guru/:
+npm run dev
+Acesse http://localhost:5173.
+Comandos adicionais:
+# Frontend (raiz)
 npm run typecheck
 npm run lint
 npm run build
-```
 
-Para pré-visualizar o build já gerado:
-
-```bash
-npm run preview
-```
-
-**Não é necessário iniciar dois terminais de frontend/backend como num sistema Express**, porque o backend deste projeto reside nos serviços externos do Supabase.
-
-### 7. Acesso inicial
-
-O frontend oferece as opções **Entrar** e **Criar conta gratuita**. Cadastro é feito por `supabase.auth.signUp`; login por `supabase.auth.signInWithPassword`.
-
-- **E-mail de administrador padrão:** não encontrado no ZIP.
-- **Senha padrão:** não encontrada no ZIP.
-- **Usuários já cadastrados:** não podem ser determinados apenas pelo código exportado.
-- **Senha do banco PostgreSQL:** não consta do ZIP.
-- **Chave pública Supabase (`anon`) e endpoint:** presentes em `project/.env`.
-- **Chave administrativa `service_role`:** apenas referenciada pelas Edge Functions; seu valor não está incluído.
-
-Para criar um usuário de teste, use a opção **Criar conta gratuita**, caso o Supabase remoto permita novos cadastros. A confirmação de e-mail, se exigida, depende das configurações do Supabase Auth. Outra possibilidade, com acesso autorizado ao Supabase, é administrar usuários na seção **Authentication** do dashboard.
-
-**Atenção ao papel de acesso:** a migração final tenta criar uma empresa para cada novo usuário com papel `owner`, enquanto outra migração prevê todos em uma mesma empresa. Corrija essa regra de negócio antes de cadastrar usuários reais. Não use a senha ou o usuário `admin@bmclub.com.br` do README de exemplo: **essas credenciais pertencem ao exemplo e não aparecem neste projeto**.
-
----
-
-# Usuário padrão para login
-
-- **E-mail:** não definido no código.
-- **Senha:** não definida no código.
-- **Cadastro:** pela tela **Criar conta gratuita**, condicionado à configuração do Supabase Auth.
-- **Banco conectado:** Supabase/PostgreSQL do projeto `jnlnbotqjjugtppggorb` (configurado, não verificado online).
-- **Consulta completa de pendências e arquivos:** veja `AUDITORIA_TECNICA.md`.
-
+# Backend (pasta server)
+npm test
+7. Acesso inicial
+O projeto utiliza cadastro e login próprios, por e-mail e senha, com autenticação JWT. O cadastro depende da configuração ALLOW_REGISTRATION.
+Não há usuário nem senha administrativa universal definidos neste README. Utilize uma conta que tenha sido criada no próprio Whats-Guru. As senhas ficam protegidas no banco; não devem ser publicadas em documentação.
+Configuração Evolution API: abra Integrações → WhatsApp → API não oficial (Evolution API) e informe a URL do servidor Evolution, o nome da instância e a API Key do provedor. Quando rodar no Docker local, utilize o endereço e a porta efetivamente publicados. O QR Code permite parear a instância. O estado open, confirmado no endpoint instance/connectionState, indica uma sessão conectada no provedor.
+Usuário padrão para login
+- E-mail: conta criada no próprio Whats-Guru (não existe credencial universal padrão documentada).
+- Senha: senha definida pelo usuário no cadastro.
+- Banco utilizado: converso_local — MySQL local.
+- API local: http://127.0.0.1:4000.
+- Frontend: http://localhost:5173.
+- WhatsApp: Evolution API ou Meta, conforme a integração da organização.
 <div align="center">
-  <strong>Converso — CRM Multicanal</strong>
-  <p>Atendimentos, contatos e automações em uma plataforma única.</p>
-  <sub>Documentação produzida a partir da análise estática do ZIP fornecido. Não foram acessados banco remoto, contas nem serviços externos.</sub>
+  <strong>Whats-Guru</strong>
+  <p>Atendimento inteligente, relacionamento e gestão em um só lugar.</p>
+  <sub>Documentação atualizada para a migração Node.js + MySQL. Integrações externas e funcionalidades operacionais devem ser verificadas no ambiente de implantação antes da publicação online.</sub>
 </div>
