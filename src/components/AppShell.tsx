@@ -69,7 +69,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 shadow-sm shadow-blue-600/20">
               <MessageCircle className="text-white" size={20} />
             </div>
-            <span className="text-lg font-bold text-slate-900">Converso</span>
+            <span className="text-lg font-bold text-slate-900">Fala Comigo</span>
           </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400">
             <X size={20} />

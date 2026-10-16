@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const route=readFileSync(new URL('../src/routes/local-data.js',import.meta.url),'utf8');
+const workflow=readFileSync(new URL('../src/services/workflow-engine.js',import.meta.url),'utf8');
+const crm=readFileSync(new URL('../../src/pages/CrmPage.tsx',import.meta.url),'utf8');
+test('etiqueta da conversa registra contato para Kanban',()=>assert.match(route,/tx\.contactTag\.upsert/));
+test('exclusao de etiqueta remove vinculos das conversas',()=>assert.match(route,/tx\.conversationTag\.deleteMany/));
+test('automacao registra etiqueta em contato e conversa',()=>assert.match(workflow,/tx\.contactTag\.upsert/));
+test('Kanban usa etiquetas dinamicas sem colunas fixas',()=>{assert.match(crm,/tags\.map\(t=>/);assert.doesNotMatch(crm,/const STAGES=/);});

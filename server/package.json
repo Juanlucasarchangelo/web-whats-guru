@@ -3,7 +3,9 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
@@ -21,6 +23,7 @@
     "express-rate-limit": "8.1.0",
     "helmet": "8.1.0",
     "jsonwebtoken": "9.0.2",
+    "qrcode": "^1.5.4",
     "zod": "3.25.76"
   },
   "devDependencies": {

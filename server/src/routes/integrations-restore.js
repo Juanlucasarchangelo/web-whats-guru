@@ -6,6 +6,7 @@ import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { visibleChannelIds, admin } from '../services/channel-access.js';
 import { syncEvolutionStatus, getEvolutionWebhookInfo, configureEvolutionWebhook } from '../services/evolution.js';
+import { findMatchingIntegration } from '../services/integration-policy.js';
 
 const key = () => {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -56,9 +57,9 @@ export async function providerFetch(url, options){
 }
 async function saveIntegration(req,{type,name,config,status,token='',verify='',appSecret=''}){
   const where={org_id:req.orgId,type};
-  const current=type==='whatsapp' && config?.provider==='evolution_api'
-    ? (await prisma.integration.findMany({where})).find(i=>i.config?.provider==='evolution_api'&&i.config?.instance_name===config.instance_name)
-    : await prisma.integration.findFirst({where,orderBy:{created_at:'asc'}});
+  // Never overwrite an Evolution instance when configuring a Meta number.
+  const existing=await prisma.integration.findMany({where,orderBy:{created_at:'asc'}});
+  const current=findMatchingIntegration(existing,type,config);
   const integration=current
     ? await prisma.integration.update({where:{id:current.id},data:{name,config,status,last_connected_at:status==='connected'?new Date():null}})
     : await prisma.integration.create({data:{id:randomUUID(),org_id:req.orgId,type,name,config,status,last_connected_at:status==='connected'?new Date():null}});
@@ -104,7 +105,13 @@ export function restoredIntegrationsRouter(){
  router.post('/whatsapp',wrap(async(req,res)=>{
   checkAdmin(req);const {action}=req.body||{};
   if(action==='disconnect'){
-   await prisma.integration.updateMany({where:{org_id:req.orgId,type:'whatsapp',...(req.body?.integration_id?{id:req.body.integration_id}:{})},data:{status:'disconnected'}});
+   // Meta-only deactivation here. Evolution uses /channels/:id/logout,
+   // which logs out the actual remote session instead of changing a DB flag.
+   const integrationId=req.body?.integration_id;
+   if(!integrationId || typeof integrationId!=='string')throw new HttpError(400,'Selecione a integracao oficial que deseja desativar.');
+   const integration=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+   if(!integration || integration.config?.connection_mode!=='official')throw new HttpError(400,'Para desconectar Evolution, use a acao do numero em Meus WhatsApps.');
+   await prisma.integration.update({where:{id:integration.id},data:{status:'disconnected'}});
    return res.json({disconnected:true});
   }
   if(action==='connect_unofficial'){

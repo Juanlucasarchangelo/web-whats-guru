@@ -96,7 +96,11 @@ async function tag(ctx, name, notify = true) {
   }
   const existing = await prisma.conversationTag.findUnique({ where: { conversation_id_tag_id: { conversation_id: ctx.conversation.id, tag_id: found.id } } });
   if (!existing) {
-    await prisma.conversationTag.create({ data: { conversation_id: ctx.conversation.id, tag_id: found.id } });
+    await prisma.$transaction(async tx => {
+      await tx.contactTag.upsert({where:{contact_id_tag_id:{contact_id:ctx.contact.id,tag_id:found.id}},create:{contact_id:ctx.contact.id,tag_id:found.id},update:{}});
+      const convs=await tx.conversation.findMany({where:{org_id:ctx.orgId,contact_id:ctx.contact.id},select:{id:true}});
+      for(const conv of convs) await tx.conversationTag.upsert({where:{conversation_id_tag_id:{conversation_id:conv.id,tag_id:found.id}},create:{conversation_id:conv.id,tag_id:found.id},update:{}});
+    });
     if (notify) await runMatching(ctx, { triggerType: 'tag_added', tag: label, token: `tag:${ctx.conversation.id}:${found.id}`, allowRecursive: false });
   }
 }

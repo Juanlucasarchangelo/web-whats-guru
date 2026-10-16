@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../db.js';
 import { HttpError } from '../http.js';
+import { getOrCreateConversation, withConversationIdentityLock } from './conversation-thread.js';
 
 const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
 const uuidFromMessage = (id) => {
@@ -117,15 +118,18 @@ export async function processWhatsAppWebhook(payload) {
         contact=await prisma.contact.create({data:{id:randomUUID(),org_id:c.orgId,name:value.contacts?.[0]?.profile?.name?.slice(0,150) || `WhatsApp ${digits}`,
           phone:`+${digits}`,custom_fields:{}}});
       }
-      let conversation=await prisma.conversation.findFirst({where:{org_id:c.orgId,contact_id:contact.id,channel:'whatsapp',status:{not:'closed'}},orderBy:{last_message_at:'desc'}});
-      if(!conversation) conversation=await prisma.conversation.create({data:{id:randomUUID(),org_id:c.orgId,contact_id:contact.id,channel:'whatsapp',status:'open'}});
-      try {
-        await prisma.$transaction(async tx=>{
-          const createdAt=/^\d+$/.test(String(incoming.timestamp)) ? new Date(Number(incoming.timestamp)*1000) : new Date();
-          await tx.message.create({data:{id:messageId,org_id:c.orgId,conversation_id:conversation.id,sender_type:'contact',body:incoming.text.body.slice(0,10000),channel:'whatsapp',status:'received',created_at:createdAt}});
-          await tx.conversation.update({where:{id:conversation.id},data:{last_message_at:createdAt,unread_count:{increment:1}}});
-        });
-      } catch(err) { if(err.code !== 'P2002') throw err; }
+      // Legacy single-number Meta configuration has no integration_id. Preserve
+      // that behavior while reusing closed threads instead of duplicating them.
+      await withConversationIdentityLock({orgId:c.orgId,contactId:contact.id,phone:contact.phone,integrationId:null},async()=>{
+        const {conversation}=await getOrCreateConversation(prisma,{orgId:c.orgId,contactId:contact.id,integrationId:null});
+        try {
+          await prisma.$transaction(async tx=>{
+            const createdAt=/^\d+$/.test(String(incoming.timestamp)) ? new Date(Number(incoming.timestamp)*1000) : new Date();
+            await tx.message.create({data:{id:messageId,org_id:c.orgId,conversation_id:conversation.id,sender_type:'contact',body:incoming.text.body.slice(0,10000),channel:'whatsapp',status:'received',created_at:createdAt}});
+            await tx.conversation.update({where:{id:conversation.id},data:{last_message_at:createdAt,unread_count:{increment:1},...(['closed','resolved'].includes(conversation.status)?{status:'open'}:{})}});
+          });
+        } catch(err) { if(err.code !== 'P2002') throw err; }
+      });
     }
     for(const item of value.statuses ?? []) {
       if(!item.id || !['sent','delivered','read','failed'].includes(item.status)) continue;

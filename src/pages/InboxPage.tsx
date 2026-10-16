@@ -406,16 +406,18 @@ export function InboxPage() {
     const hasTag = convTags.some(t => t.id === tagId);
     try {
       if (hasTag) {
-        await supabase
+        const { error } = await supabase
           .from('conversation_tags')
           .delete()
           .eq('conversation_id', selectedConv.id)
           .eq('tag_id', tagId);
+        if (error) throw error;
         setConvTags(prev => prev.filter(t => t.id !== tagId));
       } else {
-        await supabase
+        const { error } = await supabase
           .from('conversation_tags')
           .insert({ conversation_id: selectedConv.id, tag_id: tagId });
+        if (error) throw error;
         const tag = tags.find(t => t.id === tagId);
         if (tag) setConvTags(prev => [...prev, tag]);
       }
@@ -626,7 +628,7 @@ export function InboxPage() {
               <button onClick={() => setShowAssign(true)} className="btn-ghost px-2 py-1.5" title="Atribuir">
                 <UserCheck size={18} />
               </button>
-              <button onClick={() => setShowTags(true)} className="btn-ghost px-2 py-1.5" title="Etiquetas">
+              <button onClick={() => { void (async()=>{const [all,active]=await Promise.all([supabase.from('tags').select('*').eq('org_id',orgId),supabase.from('conversation_tags').select('tag:tags(*)').eq('conversation_id',selectedConv!.id)]);if(all.data)setTags(all.data as Tag[]);if(active.data)setConvTags(active.data.map((x:any)=>x.tag) as Tag[]);setShowTags(true);})(); }} className="btn-ghost px-2 py-1.5" title="Etiquetas">
                 <TagIcon size={18} />
               </button>
               <button onClick={() => setShowNotes(true)} className="btn-ghost px-2 py-1.5" title="Notas internas">

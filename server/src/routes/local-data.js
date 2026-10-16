@@ -29,7 +29,7 @@ const MODELS = {
   user_profiles: ['userProfile', 'full_name avatar_url phone'],
   integrations: ['integration', ''],
 };
-const ADMIN_WRITE = new Set(['teams', 'org_members']);
+const ADMIN_WRITE = new Set(['teams', 'org_members', 'tags']);
 const NO_WRITE = new Set(['integrations','teams','org_members','campaigns','campaign_recipients','schedules']);
 const JOINS = {
   conversation_tags: ['conversation_id', 'conversation', 'org_id'],
@@ -234,10 +234,14 @@ export function localDataRouter() {
           if (table === 'internal_notes') data.author_id = req.user.id;
           if (table === 'contacts' && data.custom_fields === undefined) data.custom_fields = {};
           if (table === 'contact_tags' || table === 'conversation_tags') {
-            created.push(await tx[model].upsert({ where: table === 'contact_tags'
-              ? { contact_id_tag_id: { contact_id: data.contact_id, tag_id: data.tag_id } }
-              : { conversation_id_tag_id: { conversation_id: data.conversation_id, tag_id: data.tag_id } },
-              create: data, update: {} }));
+            // A etiqueta pertence ao contato; as conversas apenas espelham a classificacao.
+            const contactId = table === 'contact_tags' ? data.contact_id :
+              (await tx.conversation.findFirst({where:{id:data.conversation_id,org_id:req.orgId},select:{contact_id:true}}))?.contact_id;
+            if (!contactId) throw new HttpError(404, 'Contato da conversa nao encontrado.');
+            await tx.contactTag.upsert({where:{contact_id_tag_id:{contact_id:contactId,tag_id:data.tag_id}},create:{contact_id:contactId,tag_id:data.tag_id},update:{}});
+            const convs = await tx.conversation.findMany({where:{org_id:req.orgId,contact_id:contactId},select:{id:true}});
+            for(const conv of convs) await tx.conversationTag.upsert({where:{conversation_id_tag_id:{conversation_id:conv.id,tag_id:data.tag_id}},create:{conversation_id:conv.id,tag_id:data.tag_id},update:{}});
+            created.push(table==='contact_tags'?{contact_id:contactId,tag_id:data.tag_id}:{conversation_id:data.conversation_id,tag_id:data.tag_id});
           } else {
             if (table === 'campaign_recipients') {
               const existing = await tx.campaignRecipient.findFirst({ where:{ campaign_id:data.campaign_id, contact_id:data.contact_id } });
@@ -258,6 +262,22 @@ export function localDataRouter() {
       }
       if (table === 'user_profiles' && found.some(r => r.user_id !== req.user.id)) throw new HttpError(403, 'So e permitido editar o proprio perfil.');
       if (action === 'delete') {
+        if(table==='tags') {
+          const ids=found.map(t=>t.id);
+          await tx.conversationTag.deleteMany({where:{tag_id:{in:ids}}});
+          await tx.contactTag.deleteMany({where:{tag_id:{in:ids}}});
+        }
+        if(table==='conversation_tags'||table==='contact_tags') {
+          for(const link of found) {
+            const contactId=table==='contact_tags'?link.contact_id:
+              (await tx.conversation.findFirst({where:{id:link.conversation_id,org_id:req.orgId},select:{contact_id:true}}))?.contact_id;
+            if(!contactId)continue;
+            await tx.contactTag.deleteMany({where:{contact_id:contactId,tag_id:link.tag_id}});
+            const ids=(await tx.conversation.findMany({where:{org_id:req.orgId,contact_id:contactId},select:{id:true}})).map(c=>c.id);
+            await tx.conversationTag.deleteMany({where:{conversation_id:{in:ids},tag_id:link.tag_id}});
+          }
+          return found;
+        }
         await tx[model].deleteMany({where}); return found;
       }
       const item = cleanWrite(table, values, 'update');
@@ -267,6 +287,22 @@ export function localDataRouter() {
       if(!admin(req)&&item.conversation_id)await requireConversation(req,item.conversation_id,tx);
       if (table === 'org_members' && !item.role) throw new HttpError(400,'Perfil nao informado.');
       await tx[model].updateMany({ where, data: item });
+      // As regras de automacao usam nomes de etiquetas, nao IDs.
+      // Ao renomear, mantemos os gatilhos/acoes existentes alinhados.
+      if (table === 'tags' && item.name) {
+        const rules = await tx.automation.findMany({where:{org_id:req.orgId}});
+        for (const oldTag of found) {
+          if (oldTag.name === item.name) continue;
+          for (const rule of rules) {
+            let changed = false;
+            const trigger = structuredClone(rule.trigger);
+            const actions = structuredClone(rule.actions);
+            if (trigger && typeof trigger === 'object' && trigger.type === 'tag_added' && trigger.tag === oldTag.name) {trigger.tag=item.name;changed=true;}
+            if (Array.isArray(actions)) for(const action of actions) if(action.type==='add_tag'&&action.tag===oldTag.name){action.tag=item.name;changed=true;}
+            if(changed)await tx.automation.update({where:{id:rule.id},data:{trigger,actions}});
+          }
+        }
+      }
       return tx[model].findMany({where, take:100});
     });
     res.json({ data: result });
