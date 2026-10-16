@@ -1,297 +1,231 @@
 <div align="center">
-  <img src="https://media.giphy.com/media/Ll22OhMLAlVDb8UQWe/giphy.gif" width="120" alt="Whats-Guru" />
   <h1>💬 Whats-Guru</h1>
-  <p>Plataforma de atendimento WhatsApp, caixa de entrada, contatos, CRM e automações para equipes.</p>
-
-  <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-3178C6?style=for-the-badge" alt="React + TypeScript" />
-  <img src="https://img.shields.io/badge/Backend-Node.js%20%2B%20Express-43853D?style=for-the-badge" alt="Node.js + Express" />
-  <img src="https://img.shields.io/badge/Banco-MySQL-4479A1?style=for-the-badge" alt="MySQL" />
-  <img src="https://img.shields.io/badge/WhatsApp-Evolution%20API-25D366?style=for-the-badge" alt="Evolution API" />
+  <p>CRM de atendimento com múltiplos números de WhatsApp, equipes e automações.</p>
+  <p>
+    <img src="https://img.shields.io/badge/React-Vite-149ECA?style=for-the-badge" alt="React e Vite" />
+    <img src="https://img.shields.io/badge/API-Node.js%20%2B%20Express-339933?style=for-the-badge" alt="Node e Express" />
+    <img src="https://img.shields.io/badge/ORM-Prisma-2D3748?style=for-the-badge" alt="Prisma" />
+    <img src="https://img.shields.io/badge/Banco-MySQL-4479A1?style=for-the-badge" alt="MySQL" />
+    <img src="https://img.shields.io/badge/WhatsApp-Evolution%20API-25D366?style=for-the-badge" alt="Evolution API" />
+  </p>
 </div>
 
 ---
 
-## 📖 Visão Geral
+## 📖 Visão geral
 
-O **Whats-Guru** (nome interno herdado do código: **Converso**) é uma plataforma web responsiva de atendimento multicanal e CRM, criada originalmente no Bolt.new e posteriormente migrada para execução independente em ambiente local.
+O **Whats-Guru** é uma aplicação web para organizar conversas de WhatsApp, contatos e negociações. O frontend é **React + TypeScript + Vite**; o backend é **Node.js + Express**; os dados do CRM ficam em **MySQL**, acessados pelo **Prisma**.
 
-O sistema reúne **dashboard, caixa de entrada, contatos, funil CRM (Kanban), chatbots, automações, campanhas, agendamentos, relatórios, equipes e integrações**. O objetivo da migração foi **preservar a interface e os fluxos do projeto original**, substituindo a infraestrutura Supabase por uma API própria e um banco MySQL.
-
-A versão local utiliza **React + TypeScript + Vite** no frontend, **Node.js + Express** na API, **Prisma ORM** para acessar o **MySQL** e **JWT** na autenticação. O WhatsApp pode ser configurado nas modalidades **API oficial da Meta** e **API não oficial via Evolution API**. A Evolution pode estar em um contêiner Docker, com instância configurada pelo painel de Integrações.
-
-> **Situação atual:** login, conexão da API com MySQL (24/24 tabelas) e conexão de uma instância Evolution (`state: open`) foram confirmados durante a implantação local. O usuário relatou que a implementação está funcionando, mas ainda há ajustes pendentes. Isso **não comprova todos os fluxos** de recebimento, campanhas, chatbots, automações ou publicação em produção.
-
-> **Supabase:** o arquivo `src/lib/supabase.ts` permanece como **adaptador de compatibilidade** para páginas que usam a sintaxe antiga `supabase.from(...)`; na versão migrada analisada, ele chama a API local. A dependência `@supabase/supabase-js` e arquivos legados do projeto podem permanecer no repositório, mas **não são o banco operacional desta arquitetura**. Não remover esses arquivos sem verificar importações e compilar novamente.
-
----
+A conexão com WhatsApp é feita pela **Evolution API**, executada em **Docker Desktop**, em uma pasta independente. Algumas partes internas do código ainda usam o nome técnico **Converso**; não é outro sistema.
 
 ## 🎯 Objetivos
 
-- Centralizar atendimentos e conversas de WhatsApp em uma caixa de entrada.
-- Organizar contatos, etiquetas e oportunidades em CRM Kanban.
-- Integrar o **WhatsApp oficial (Meta)** e o **não oficial (Evolution API)**, preservando ambas as opções.
-- Consultar histórico de mensagens e registrar informações de atendimento.
-- Gerenciar organizações, membros, equipes e permissões.
-- Criar fluxos de chatbot e regras de automação.
-- Preparar campanhas segmentadas e agendamentos.
-- Exibir relatórios e indicadores de operação.
-- Manter os dados do sistema em **MySQL** gerenciado pela API Node.js.
-- Desenvolver localmente e preparar publicação online posteriormente.
+- Centralizar atendimentos de diferentes números no mesmo painel.
+- Organizar atendentes, equipes e permissões por número.
+- Gerenciar contatos, oportunidades e funil CRM Kanban.
+- Operar chatbots, automações, campanhas e mensagens agendadas.
+- Acompanhar relatórios e dados de atendimento.
 
----
-
-## 🚀 Tecnologias Utilizadas
+## 🚀 Tecnologias utilizadas
 
 <div align="left">
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" height="30" alt="React" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" height="30" alt="TypeScript" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" height="30" alt="Vite" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" height="30" alt="Node.js" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/express/express-original.svg" height="30" alt="Express" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" height="30" alt="MySQL" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/prisma/prisma-original.svg" height="30" alt="Prisma" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/tailwindcss/tailwindcss-original.svg" height="30" alt="Tailwind CSS" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" height="30" alt="Docker" />
 </div>
 
-| Camada | Tecnologia | Observação |
-|---|---|---|
-| Frontend | React 18, TypeScript, Vite 5 | Interface web responsiva |
-| UI | Tailwind CSS, Lucide React | Preservação da interface original |
-| Backend | Node.js, Express 5 | API REST em `server/` |
-| Banco | MySQL | Banco local `converso_local` |
-| ORM | Prisma 6.19.3 | Mapeamento das 24 tabelas |
-| Autenticação | JWT, bcryptjs | Conta e sessão gerenciadas pela API local |
-| Integração WhatsApp não oficial | Evolution API | Instância no Docker e API key do provedor |
-| Integração WhatsApp oficial | Meta WhatsApp Business Platform | Caminho separado, sujeito às credenciais oficiais |
-| Segurança/API | Helmet, CORS, rate limiting, Zod | Proteções implementadas no backend |
+## ✅ Funcionalidades
 
-**Não usamos Supabase/PostgreSQL como banco operacional desta versão.** O Supabase fazia parte da arquitetura original; arquivos e nomes herdados podem continuar no código apenas para compatibilidade ou histórico.
+- [x] Login, cadastro de usuários e perfil.
+- [x] Caixa de entrada, contatos e CRM Kanban.
+- [x] Vários números/instâncias Evolution e permissões por equipe.
+- [x] Chatbots e automações.
+- [x] Campanhas, agendamentos e relatórios.
+- [x] Integrações com WhatsApp via Evolution API.
 
----
+> O uso com **API oficial da Meta** requer configuração e validação próprias; não é a mesma instalação da Evolution.
 
-## 🚀 Funcionalidades
-
-As marcações `[x]` indicam implementação identificada **e/ou validação relatada na instalação local**. `[ ]` indica fluxo ainda pendente de confirmação integral ou trabalho adicional; não confundir existência de tela com operação completa.
-
-- [x] Cadastro e login local com e-mail e senha.
-- [x] Sessão autenticada por JWT e logout.
-- [x] Organização e associação de usuários por papéis (`owner`, `admin`, `agent`).
-- [x] Dashboard com indicadores consultados na API local.
-- [x] Cadastro e consulta de contatos no MySQL (testados no ambiente local).
-- [x] Estrutura de caixa de entrada com conversas e mensagens.
-- [x] Estrutura de CRM Kanban, etiquetas, etapas e oportunidades.
-- [x] Telas de chatbots, automações, campanhas e agendamentos preservadas na migração.
-- [x] Telas de relatórios e equipes.
-- [x] Integração configurável com **Evolution API** e **API oficial da Meta**.
-- [x] Geração de QR Code da Evolution na interface (confirmada pelo usuário).
-- [x] Instância Evolution `whats-guru` respondendo `open` em teste direto.
-- [x] API local conectada ao banco `converso_local`, com 24/24 tabelas confirmadas.
-- [ ] Validação automatizada e abrangente de **envio e recebimento** pela Evolution em diferentes cenários e reinícios.
-- [ ] Validar webhook de entrada e atualização de status de mensagens na operação real.
-- [ ] Testar de ponta a ponta integração com API oficial da Meta.
-- [ ] Validar execução de chatbots, automações, campanhas e agendamentos (não apenas seus cadastros).
-- [ ] Verificar permissões por organização e cobertura de testes de regressão.
-- [ ] Revisão de segurança, backup, HTTPS, logs e preparação para produção.
-
----
-
-## 🏗 Arquitetura do Sistema
+## 🏗 Arquitetura
 
 ```mermaid
 flowchart TD
-    A["Frontend - React / TypeScript / Vite"] --> B["API local - Node.js / Express"]
-    B --> C["Autenticacao JWT"]
-    B --> D["Prisma ORM"]
-    D --> E["MySQL - converso_local"]
-    B --> F["Integracoes WhatsApp"]
-    F --> G["Evolution API - Docker"]
-    F --> H["Meta WhatsApp Business Platform"]
-    G --> I["WhatsApp"]
-    H --> I
-    G -. "Webhooks / eventos a validar" .-> B
+    A["Navegador: React + Vite :5173"] --> B["API Node + Express :4000"]
+    B --> C["Prisma"]
+    C --> D["MySQL no Windows :3306"]
+    B <--> E["Evolution API no Docker :8080"]
+    E --> F["PostgreSQL no Docker"]
+    E --> G["Redis no Docker"]
+    E <--> H["WhatsApp"]
 ```
 
-**Estrutura principal:**
+**São dois ambientes separados:** o MySQL guarda os dados do Whats-Guru; o PostgreSQL e o Redis são serviços **internos do Docker para a Evolution**. Não instale PostgreSQL ou Redis manualmente no Windows.
 
 ```text
-whats-guru/
-├── src/                        # Frontend React / TypeScript
-│   ├── pages/                  # Dashboard, Inbox, Contatos, CRM, Integrações etc.
-│   ├── components/             # Componentes de interface
-│   ├── contexts/               # Sessão e organização
-│   └── lib/
-│       ├── api.ts              # Cliente da API Node local
-│       └── supabase.ts         # Adaptador legado -> API local (não banco Supabase)
-├── server/                     # Backend próprio
-│   ├── src/
-│   │   ├── index.js            # Inicialização da API
-│   │   ├── app.js              # Express e montagem das rotas
-│   │   ├── routes/             # Autenticação, contatos, conversas, integrações etc.
-│   │   ├── services/           # Comunicação com provedores WhatsApp
-│   │   └── middleware/         # Autorização e contexto de organização
-│   ├── prisma/schema.prisma    # Modelos Prisma para MySQL
-│   ├── scripts/                # Ferramentas de validação do banco
-│   ├── .env                    # Configurações privadas (não versionar)
-│   └── package.json
-├── supabase/                   # Legado da exportação Bolt (não necessário ao banco atual)
-├── .env                        # Configuração do frontend; revisar antes de publicar
-├── package.json                # Scripts frontend
-└── vite.config.ts
+C:\Users\SEU_USUARIO\Documents\Projetos\
+├── web-whats-guru\          # Aplicação React + API + Prisma + MySQL
+│   ├── README.md
+│   ├── package.json          # Frontend
+│   ├── src\
+│   └── server\
+│       ├── .env.example
+│       ├── package.json
+│       └── prisma\schema.prisma
+└── evolution-api\           # Independente do Whats-Guru
+    ├── .env
+    └── docker.yml
 ```
-
-**Banco de dados:** MySQL `converso_local`, com **24 tabelas verificadas**. A tabela `users` foi acrescentada para autenticação própria, substituindo a dependência do Supabase Auth. O banco também contém organizações, membros, contatos, conversas, mensagens, integrações e credenciais de integração. **A conexão Evolution é externa ao MySQL**; o MySQL armazena informações e configurações, enquanto o serviço Evolution se comunica com o WhatsApp.
 
 ---
 
-## 📦 Instalação
+## 📦 Instalação do zero — Windows
+
+Siga estas etapas **na ordem**, em uma máquina nova. Os comandos de banco abaixo se destinam a uma instalação **vazia**. Não rode `prisma db push` num banco com dados sem backup e revisão.
 
 ### 1. Pré-requisitos
 
-Instale:
+Instale **Node.js 20.19+**, **MySQL Server 8+** e **Docker Desktop** (com WSL 2 habilitado). **Git** é necessário se for clonar o repositório. **HeidiSQL** é opcional para visualizar o banco. Abra o Docker Desktop e espere o motor iniciar.
 
-- [Node.js](https://nodejs.org/) — Node.js 20.19+; ambiente já testado com **v24.21.0** e npm **11.19.0**.
-- [Git](https://git-scm.com/downloads) — recomendado para versionamento.
-- [MySQL Server](https://dev.mysql.com/downloads/mysql/) e [MySQL Workbench](https://dev.mysql.com/downloads/workbench/) — banco local.
-- [VS Code](https://code.visualstudio.com/) — recomendado.
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — caso a Evolution API rode em contêiner no próprio computador.
-- Instância **Evolution API** configurada, para atendimento por WhatsApp não oficial.
+Verifique no PowerShell:
 
-### 2. Baixar o projeto
-
-Clone um repositório privado, se existir, ou utilize a pasta local do projeto:
-
-```bash
-git clone <URL_DO_REPOSITORIO>
-cd whats-guru
+```powershell
+node -v
+npm -v
+docker --version
+docker compose version
 ```
 
-**No computador em que o projeto foi configurado:** `C:\Users\ImportsBR-PC1\Documents\Projetos\whats-guru`. Não há URL de repositório confirmada nesta documentação.
+Baixe ou clone **seu repositório do Whats-Guru** e abra a pasta `web-whats-guru`. O repositório precisa incluir `package.json`, `src`, `server` e `server/prisma/schema.prisma`. Não use URLs de GitHub de outros projetos.
 
-### 3. Instalar as dependências
+### 2. Criar o banco MySQL vazio
 
-**Frontend** — dentro de `whats-guru/`:
+**PowerShell (em qualquer pasta):**
 
-```bash
+```powershell
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS converso_local CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+Digite sua senha de **root do MySQL** quando solicitada. Isso **cria só o banco**, não as tabelas. Se `mysql` não for reconhecido no PowerShell, use o executável `mysql.exe` da pasta `bin` da instalação do MySQL ou execute a mesma instrução no HeidiSQL.
+
+### 3. Configurar e instalar a API
+
+**PowerShell A — pasta `web-whats-guru\server`:**
+
+```powershell
 npm install
+Copy-Item .env.example .env
+node scripts/generate-secret.js
+notepad .env
 ```
 
-**Backend** — dentro de `whats-guru/server/`:
+O comando `generate-secret.js` gera uma chave aleatória. Execute **três vezes** e use valores diferentes para `JWT_SECRET`, `INTEGRATION_ENCRYPTION_KEY` e `EVOLUTION_WEBHOOK_SECRET`.
 
-```bash
-cd server
-npm install
-npm run db:validate
-npm run db:generate
-```
-
-> As duas pastas possuem arquivos `package.json` distintos. Execute `npm` na pasta correspondente.
-
-### 4. Configurar as variáveis de ambiente
-
-No frontend (`whats-guru/.env`), configure o endereço da API:
-
-```env
-VITE_API_URL=http://127.0.0.1:4000
-```
-
-No backend (`whats-guru/server/.env`):
+Configure as seguintes linhas em **`server/.env`**, mantendo as demais existentes:
 
 ```env
 NODE_ENV=development
 HOST=0.0.0.0
 PORT=4000
-DATABASE_URL="mysql://converso_app:SENHA_LOCAL@127.0.0.1:3306/converso_local"
-JWT_SECRET="SEGREDO_LONGO_ALEATORIO"
+DATABASE_URL="mysql://root:SUA_SENHA_MYSQL@127.0.0.1:3306/converso_local"
+JWT_SECRET=CHAVE_ALEATORIA_1
 JWT_EXPIRES_IN=12h
 ALLOW_REGISTRATION=true
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-INTEGRATION_ENCRYPTION_KEY="CHAVE_DE_CRIPTOGRAFIA_EXISTENTE"
+INTEGRATION_ENCRYPTION_KEY=CHAVE_ALEATORIA_2
 EVOLUTION_ALLOW_LOCAL_HTTP=true
 EVOLUTION_AUTO_WEBHOOK=true
 EVOLUTION_WEBHOOK_PUBLIC_URL=http://host.docker.internal:4000
-EVOLUTION_WEBHOOK_SECRET="SEGREDO_ALEATORIO_EXCLUSIVO_DO_WEBHOOK"
+EVOLUTION_WEBHOOK_SECRET=CHAVE_ALEATORIA_3
 ```
 
-**Atenção:** exemplos acima contêm marcadores, **não credenciais reais**. Preserve a `INTEGRATION_ENCRYPTION_KEY` que já está em uso: alterá-la pode impedir a leitura das credenciais de integrações existentes. No ambiente local, `EVOLUTION_ALLOW_LOCAL_HTTP=true` foi usado para permitir Evolution em loopback, como `http://127.0.0.1:8080`; confira a versão instalada antes de configurar.
+Troque as chaves e a senha pelos valores reais. Se a senha MySQL tiver `@`, `#`, `:`, `/`, `%` ou outros caracteres especiais, codifique esses caracteres na URL. A conta `root` é usada **somente para facilitar o desenvolvimento local**; ambientes publicados devem usar usuário próprio e privilégios mínimos. `HOST=0.0.0.0` permite que o contêiner da Evolution chame o webhook do backend Windows; mantenha o acesso protegido pela rede/firewall local.
 
-Se a senha MySQL contiver caracteres reservados como `@`, `#`, `:` ou `/`, codifique-os na URL. Jamais inclua credenciais em arquivos versionados no Git. **Não use variáveis `VITE_` para segredos**, pois ficam acessíveis no navegador.
+### 4. Criar todas as tabelas pelo Prisma
 
-### 5. Instalar Docker Desktop e Evolution API (Windows)
-
-Este é o procedimento usado na configuração local que funcionou para o projeto. **A Evolution fica em uma pasta separada do Whats-Guru.** Não crie `evolution-local` dentro da raiz do CRM.
-
-**Organização das pastas (exemplo):**
-
-```text
-Documentos/Projetos/
-├── whats-guru/            ← Frontend, backend e README do CRM
-│   └── server/             ← Backend Node.js e banco MySQL converso_local
-└── evolution-api/          ← Docker Compose da Evolution (separado)
-    ├── docker-compose.yml
-    └── .env                ← Senhas da Evolution; não subir para o Git
-```
-
-**5.1. Instalar e testar o Docker Desktop**
-
-1. Instale o [Docker Desktop para Windows](https://docs.docker.com/desktop/setup/install/windows-install/) e habilite o WSL 2 se solicitado.
-2. Abra o Docker Desktop e espere aparecer como ativo.
-3. No PowerShell, confira:
+**Ainda no PowerShell A, dentro de `server`:**
 
 ```powershell
-docker --version
-docker compose version
-docker run --rm hello-world
+npx prisma validate
+npx prisma db push
+npx prisma generate
+npm run db:check
 ```
 
-O último comando baixa e executa um contêiner de teste. Se funcionar, o Docker está pronto.
+- **`prisma db push` cria as 24 tabelas** com base no `server/prisma/schema.prisma` atualizado, incluindo relacionamentos e campos de múltiplos WhatsApps, campanhas e agendamentos.
+- `db:check` deve mostrar `Banco: converso_local | Tabelas: 24/24`.
+- **Não importe nenhum `.sql` manualmente.** Não execute `prisma db pull` num banco novo: ele serve para ler um banco existente, não para criar tabelas.
+- **Não rode** `upgrade-multi-whatsapp.js` nem `upgrade-operations.js` nessa instalação nova. O schema já inclui os campos finais. Esses scripts são apenas para atualizar bancos antigos.
 
-**5.2. Criar a pasta separada da Evolution**
+**Importante:** esta versão do README vem acompanhada de um `schema.prisma` ajustado para permitir a criação do banco pelo Prisma. Se você estiver usando outra versão do repositório, confira se o schema também está atualizado **antes de seguir**. Se `prisma validate` ou `db push` apresentar erro, pare e corrija a causa; não use `--force-reset`.
 
-Abra o PowerShell em `Documentos/Projetos` (ou na pasta onde você guarda seus projetos) e execute:
+### 5. Iniciar o backend e o frontend
+
+**PowerShell A — `web-whats-guru\server`:**
 
 ```powershell
-mkdir evolution-api
-cd evolution-api
+npm run dev
 ```
 
-A partir daqui, **todos os comandos `docker compose` são executados dentro da pasta `evolution-api`**, e não dentro de `whats-guru` ou `whats-guru/server`.
+**PowerShell B — `web-whats-guru` (raiz):**
 
-**5.3. Criar o arquivo `.env` da Evolution**
+```powershell
+npm install
+npm run dev
+```
 
-Dentro de `evolution-api`, crie `.env` com estes valores de exemplo e substitua os marcadores por senhas/chaves suas:
+Abra:
+
+- **Whats-Guru:** http://localhost:5173
+- **Saúde da API:** http://127.0.0.1:4000/api/health
+
+No primeiro acesso, crie seu usuário pela tela de cadastro. O sistema não fornece uma senha administrativa padrão.
+
+### 6. Instalar a Evolution API em pasta separada
+
+**Não coloque a Evolution dentro de `web-whats-guru`.** Crie a pasta irmã `evolution-api`:
+
+```powershell
+cd "$HOME\Documents\Projetos"
+New-Item -ItemType Directory -Force evolution-api | Out-Null
+Set-Location evolution-api
+```
+
+Nesta pasta, crie **dois arquivos**: `.env` e `docker.yml`. Você pode copiar os exemplos abaixo ou usar o pacote opcional **`EVOLUTION_API_MODELO.zip`**. Nesse caso, extraia os dois arquivos **diretamente na pasta `evolution-api`**, copie `.env.example` para `.env` e preencha os segredos.
+
+**Conteúdo de `evolution-api\.env`:**
 
 ```env
 SERVER_NAME=evolution
 SERVER_TYPE=http
 SERVER_PORT=8080
 SERVER_URL=http://localhost:8080
-AUTHENTICATION_API_KEY=COLE_AQUI_SUA_CHAVE_GERADA
-POSTGRES_PASSWORD=COLE_AQUI_UMA_SENHA_FORTE
 DATABASE_ENABLED=true
 DATABASE_PROVIDER=postgresql
-DATABASE_CONNECTION_URI=postgresql://evolution:COLE_AQUI_A_MESMA_SENHA_FORTE@postgres:5432/evolution?schema=public
-DATABASE_CONNECTION_CLIENT_NAME=evolution
+DATABASE_CONNECTION_CLIENT_NAME=bmclub_evolution
+DATABASE_SAVE_DATA_INSTANCE=true
+DATABASE_SAVE_DATA_NEW_MESSAGE=true
+DATABASE_SAVE_MESSAGE_UPDATE=true
+DATABASE_SAVE_DATA_CONTACTS=true
+DATABASE_SAVE_DATA_CHATS=true
+DATABASE_SAVE_DATA_HISTORIC=true
 CACHE_REDIS_ENABLED=true
-CACHE_REDIS_URI=redis://redis:6379/6
-CACHE_REDIS_PREFIX_KEY=evolution
+CACHE_REDIS_PREFIX_KEY=bmclub_evolution
+CACHE_REDIS_SAVE_INSTANCES=true
+CACHE_LOCAL_ENABLED=false
+AUTHENTICATION_API_KEY=COLE_UMA_CHAVE_ALEATORIA
+AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=false
+POSTGRES_PASSWORD=SENHA_ALFANUMERICA_FORTE
 RABBITMQ_ENABLED=false
 S3_ENABLED=false
 ```
 
-**Atenção:** substitua `COLE_AQUI_A_MESMA_SENHA_FORTE` pela mesma senha definida em `POSTGRES_PASSWORD`. Para evitar problemas na URI, use uma senha alfanumérica longa para esse serviço. Para gerar a API Key, execute no PowerShell:
+Escolha **outra chave aleatória** para `AUTHENTICATION_API_KEY`. Em `POSTGRES_PASSWORD`, use uma senha forte com letras e números (evita problemas com caracteres especiais na URL da Evolution). **Não deixe as duas variáveis vazias.**
 
-```powershell
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-**Por que há PostgreSQL e Redis aqui?** Eles são **contêineres auxiliares da Evolution API**, iniciados automaticamente pelo Docker Compose. Não são o banco do Whats-Guru e **não precisam ser instalados manualmente no Windows**. O Whats-Guru continua usando **MySQL `converso_local`**, como configurado nas etapas anteriores.
-
-**5.4. Criar `docker-compose.yml` na pasta `evolution-api`**
-
-Use a imagem da Evolution utilizada na nossa instalação: `evoapicloud/evolution-api:v2.3.7`, com PostgreSQL 15 e Redis 7.
+**Conteúdo de `evolution-api\docker.yml`** (mesma configuração usada na máquina que funcionou):
 
 ```yaml
-
 services:
   postgres:
     image: postgres:15
@@ -344,161 +278,62 @@ volumes:
   evolution_instances:
 ```
 
-> Esta é uma configuração **para uma instalação nova**, reconstruída com a mesma versão, serviços e organização de pastas usados na nossa instalação. Não substitua o `docker-compose.yml` de uma Evolution já funcionando. Nunca execute `docker compose down -v` sem entender as consequências: `-v` remove os volumes com dados/sessões.
+Como o arquivo foi nomeado **`docker.yml`** (e não `compose.yml`), todos os comandos precisam de **`-f docker.yml`**:
 
-**5.5. Iniciar e verificar a Evolution**
-
-Ainda no PowerShell, dentro de `evolution-api`:
+**PowerShell C — `evolution-api`:**
 
 ```powershell
-docker compose config --quiet
-docker compose up -d
-docker compose ps
+Copy-Item .env.example .env   # somente se usou o ZIP de modelos
+notepad .env
+# Preencha AUTHENTICATION_API_KEY e POSTGRES_PASSWORD antes de continuar.
+docker compose -f docker.yml config --quiet
+docker compose -f docker.yml pull
+docker compose -f docker.yml up -d
+docker compose -f docker.yml ps
+docker compose -f docker.yml logs --tail=50 evolution-api
 ```
 
-Acesse `http://localhost:8080` no navegador. Para visualizar logs:
+A Evolution fica em **http://localhost:8080**. PostgreSQL e Redis são criados como serviços do Compose e ficam **dentro do Docker**.
 
-```powershell
-docker compose logs --tail=100 evolution
-```
+**Não altere `POSTGRES_PASSWORD` depois que o volume do PostgreSQL foi inicializado**, pois alterar só o `.env` não troca a senha existente. Não use `docker compose down -v` para tentar corrigir erros: o `-v` remove volumes e dados.
 
-Se `docker compose config --quiet` mostrar algum erro, corrija primeiro o `.env`/`docker-compose.yml` antes de iniciar.
+### 7. Conectar o WhatsApp no CRM
 
-**5.6. Conectar a Evolution ao Whats-Guru**
+Com o backend e a Evolution em execução:
 
-Abra **outro PowerShell**, agora na pasta `whats-guru/server`, e confira no arquivo `server/.env`:
+1. Crie/conecte uma instância na Evolution, usando a API Key definida no `.env` da Evolution.
+2. No Whats-Guru, abra **Integrações** e cadastre/vincule a instância.
+3. Informe **URL da Evolution** `http://127.0.0.1:8080`, **nome exato da instância** e **API Key da Evolution**.
+4. Confira o webhook do Whats-Guru (`http://host.docker.internal:4000`, configurado no `server/.env`) e teste recebimento e envio.
+5. Para outros números, conecte outras instâncias e configure os acessos em **Equipe & Permissões**.
 
-```env
-HOST=0.0.0.0
-PORT=4000
-EVOLUTION_ALLOW_LOCAL_HTTP=true
-EVOLUTION_AUTO_WEBHOOK=true
-EVOLUTION_WEBHOOK_PUBLIC_URL=http://host.docker.internal:4000
-EVOLUTION_WEBHOOK_SECRET=CRIE_UM_SEGREDO_EXCLUSIVO
-```
+---
 
-**Não copie esse bloco apagando as demais variáveis existentes** (`DATABASE_URL`, `JWT_SECRET`, `INTEGRATION_ENCRYPTION_KEY` etc.). `EVOLUTION_ALLOW_LOCAL_HTTP=true` é apenas para desenvolvimento local.
+## 🧰 Comandos úteis
 
-Inicie ou reinicie a API do Whats-Guru:
+| Onde | Comando | Resultado |
+|---|---|---|
+| `server` | `npm run db:check` | Confere o banco e as 24 tabelas |
+| `server` | `npx prisma generate` | Regenera o Prisma Client |
+| `server` | `npm run dev` | API na porta 4000 |
+| Raiz do Whats-Guru | `npm run dev` | Site na porta 5173 |
+| `evolution-api` | `docker compose -f docker.yml ps` | Estado dos contêineres |
+| `evolution-api` | `docker compose -f docker.yml logs --tail=50 evolution-api` | Logs da Evolution |
+| `evolution-api` | `docker compose -f docker.yml stop` | Para os contêineres sem apagar dados |
+| `evolution-api` | `docker compose -f docker.yml start` | Reinicia os contêineres existentes |
 
-```powershell
-npm run dev
-```
+### Problemas mais comuns
 
-Depois, na interface **Integrações** do CRM, cadastre a Evolution com:
-
-- **URL:** `http://localhost:8080` (ou `http://127.0.0.1:8080`)
-- **Nome da instância:** um nome único, por exemplo `whats-guru`
-- **API Key:** o valor definido em `AUTHENTICATION_API_KEY` no `.env` de `evolution-api`
-
-Gere o QR Code e conecte o WhatsApp. Confira o estado `open` e teste **envio e recebimento** pela Caixa de Entrada.
-
-**Webhook — diferença essencial entre os endereços:**
-
-| Endereço | Para que serve |
+| Erro | Causa / correção |
 |---|---|
-| `http://localhost:8080` | O Whats-Guru acessa a API da Evolution no Windows |
-| `http://host.docker.internal:4000` | O contêiner da Evolution acessa o backend Whats-Guru rodando no Windows |
-| `http://localhost:5173` | Navegador acessa o frontend do Whats-Guru |
+| `Database converso_local does not exist` | Criar banco vazio na etapa 2 e conferir `DATABASE_URL`. |
+| `Prisma P1000` no Whats-Guru | Senha/usuário do **MySQL** incorretos. |
+| `Prisma P1000` na Evolution | `POSTGRES_USER` deve ser `evolution` e a URI usa `evolution:${POSTGRES_PASSWORD}`; conferir se o volume já foi inicializado com outra senha. |
+| `No such image` | Executar `docker compose -f docker.yml pull` e depois `up -d`. |
+| Docker ignora o Compose | Usar `-f docker.yml`, pois esse nome não é um padrão detectado automaticamente. |
+| API não recebe respostas | Verificar `HOST=0.0.0.0`, `EVOLUTION_WEBHOOK_PUBLIC_URL`, chave de webhook e firewall local. |
+| `npm run dev` reiniciando por mudanças em `node_modules` | Conferir dependências/watch do Node; isso é independente da autenticação do MySQL. |
 
-Não coloque `localhost:8080` como destino do webhook. Isso aponta para a própria Evolution, não para o backend que recebe as mensagens.
+## 🔒 Segurança
 
-**Mais de um WhatsApp:** use uma instância distinta para cada número dentro da mesma Evolution. Cadastre cada instância em **Integrações**; o CRM associa conversas a números, e a tela **Equipe & Permissões** permite controlar os acessos.
-
-**5.7. Comandos para manutenção — sempre na pasta `evolution-api`**
-
-```powershell
-docker compose ps                    # Ver contêineres
-docker compose logs --tail=100 evolution # Consultar logs
-docker compose stop                  # Parar sem apagar dados
-docker compose start                 # Ligar novamente
-```
-
-Em caso de erro de conexão, verifique primeiro se o Docker Desktop está aberto, se `docker compose ps` mostra a Evolution rodando e se `http://localhost:8080` responde. Se envia mas não recebe, confira `EVOLUTION_WEBHOOK_PUBLIC_URL`, reinicie o backend e atualize o registro do webhook na integração.
-
----
-
-### 6. Preparar o banco de dados
-
-O banco utilizado é **MySQL**, **não Supabase**.
-
-O banco `converso_local` e as 24 tabelas já foram criados no ambiente de desenvolvimento. Para validar a conexão existente, execute na pasta `server`:
-
-```bash
-npm run db:validate
-npm run db:generate
-npm run db:check
-```
-
-Resultado confirmado nessa instalação:
-
-```text
-Banco: converso_local | Tabelas: 24/24
-OK: conexao MySQL e estrutura base presentes.
-```
-
-Para uma instalação nova, utilize o script SQL da Etapa 2 da migração e configure um usuário MySQL com permissões apenas no banco da aplicação. **Não execute novamente scripts de criação sem revisar o estado do banco e efetuar backup.** `prisma generate` cria o cliente JavaScript; não cria sozinho as tabelas.
-
-### 7. Iniciar o projeto
-
-Abra **dois terminais**.
-
-**Terminal 1 — API:**
-
-```bash
-cd server
-npm run dev
-```
-
-Acesse `http://127.0.0.1:4000/api/health`. Resposta confirmada no ambiente local:
-
-```json
-{"api":"online","mysql":"connected","tables":24,"expected_tables":24}
-```
-
-**Terminal 2 — Frontend:** abra outro terminal na pasta raiz `whats-guru/`:
-
-```bash
-npm run dev
-```
-
-Acesse **http://localhost:5173**.
-
-Comandos adicionais:
-
-```bash
-# Frontend (raiz)
-npm run typecheck
-npm run lint
-npm run build
-
-# Backend (pasta server)
-npm test
-```
-
-### 8. Acesso inicial
-
-O projeto utiliza **cadastro e login próprios**, por e-mail e senha, com autenticação JWT. O cadastro depende da configuração `ALLOW_REGISTRATION`.
-
-**Não há usuário nem senha administrativa universal definidos neste README.** Utilize uma conta que tenha sido criada no próprio Whats-Guru. As senhas ficam protegidas no banco; não devem ser publicadas em documentação.
-
-**Configuração Evolution API:** abra **Integrações → WhatsApp → API não oficial (Evolution API)** e informe a URL do servidor Evolution, o nome da instância e a API Key do provedor. Quando rodar no Docker local, utilize o endereço e a porta efetivamente publicados. O QR Code permite parear a instância. O estado `open`, confirmado no endpoint `instance/connectionState`, indica uma sessão conectada no provedor.
-
----
-
-# Usuário padrão para login
-
-- **E-mail:** conta criada no próprio Whats-Guru (não existe credencial universal padrão documentada).
-- **Senha:** senha definida pelo usuário no cadastro.
-- **Banco utilizado:** `converso_local` — MySQL local.
-- **API local:** `http://127.0.0.1:4000`.
-- **Frontend:** `http://localhost:5173`.
-- **WhatsApp:** Evolution API ou Meta, conforme a integração da organização.
-
----
-
-<div align="center">
-  <strong>Whats-Guru</strong>
-  <p>Atendimento inteligente, relacionamento e gestão em um só lugar.</p>
-  <sub>Documentação atualizada para a migração Node.js + MySQL. Integrações externas e funcionalidades operacionais devem ser verificadas no ambiente de implantação antes da publicação online.</sub>
-</div>
+Não publique os arquivos `.env`, senhas, tokens, backups ou chaves. O README usa **apenas exemplos**. Esta configuração é para **desenvolvimento local**; publicar na internet requer HTTPS, gerenciamento de segredos, firewall e permissões adequadas. Para migrar dados de outra máquina, restaure um backup do MySQL e **não** execute `db push` sobre esse banco sem avaliar as diferenças.
