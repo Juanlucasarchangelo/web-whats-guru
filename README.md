@@ -291,35 +291,52 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Use a imagem da Evolution utilizada na nossa instalação: `evoapicloud/evolution-api:v2.3.7`, com PostgreSQL 15 e Redis 7.
 
 ```yaml
+
 services:
   postgres:
     image: postgres:15
     restart: unless-stopped
     environment:
-      POSTGRES_DB: evolution
       POSTGRES_USER: evolution
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: evolution
     volumes:
       - evolution_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - evolution_redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  evolution:
+  evolution-api:
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
-    depends_on:
-      - postgres
-      - redis
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
       - .env
+    environment:
+      DATABASE_CONNECTION_URI: postgresql://evolution:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      CACHE_REDIS_URI: redis://redis:6379/1
     volumes:
       - evolution_instances:/evolution/instances
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   evolution_postgres_data:
