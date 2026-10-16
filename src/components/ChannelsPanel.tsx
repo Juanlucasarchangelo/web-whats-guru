@@ -248,7 +248,7 @@ export function ChannelsPanel({ canManage = true }: { canManage?: boolean }) {
     <Modal open={qrChannel !== null} onClose={() => {setQrChannel(null);setQrData(null);setQrError('');}} title={`Conectar: ${qrChannel ? displayName(qrChannel) : ''}`} size="md">
       <div className="space-y-4 text-center">
         <p className="text-sm text-slate-600">No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho. Escaneie o código abaixo.</p>
-        {qrData?.qr_code && <img src={qrData.qr_code} alt="QR Code da instância Evolution" className="w-72 h-72 mx-auto object-contain bg-white rounded-lg p-2 border border-slate-200"/>}
+        {qrData?.qr_code && <img src={qrData.qr_code} alt="QR Code da instância Evolution" className="w-72 h-72 mx-auto object-contain bg-[#F2F2F0] rounded-lg p-2 border border-slate-200"/>}
         {!qrData?.qr_code && !qrError && <div className="h-56 flex items-center justify-center text-slate-500 gap-2"><Loader2 size={20} className="animate-spin"/> Gerando QR Code...</div>}
         {qrError && <p className="text-sm text-amber-800 bg-amber-50 p-3 rounded-lg">{qrError}</p>}
         {!qrData?.qr_code && qrData?.pairing_code && <p className="text-sm text-slate-700">Código de pareamento alternativo: <code className="font-semibold">{qrData.pairing_code}</code></p>}

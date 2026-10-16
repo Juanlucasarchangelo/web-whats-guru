@@ -2,100 +2,114 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Whats-Guru: tokens cromáticos. Tema escuro é o padrão. */
 @layer base {
-  :root {
-    --color-primary-50: #eff6ff;
-    --color-primary-100: #dbeafe;
-    --color-primary-200: #bfdbfe;
-    --color-primary-300: #93c5fd;
-    --color-primary-400: #60a5fa;
-    --color-primary-500: #3b82f6;
-    --color-primary-600: #2563eb;
-    --color-primary-700: #1d4ed8;
-    --color-primary-800: #1e40af;
-    --color-primary-900: #1e3a8a;
+  :root, :root[data-theme='dark'] {
+    color-scheme: dark;
+    --brand-ink: 26 26 26;           /* Preto Imports #1A1A1A */
+    --brand-steel: 92 92 92;         /* Aço #5C5C5C */
+    --brand-amber: 255 199 52;      /* Âmbar #FFC734 */
+    --brand-paper: 242 242 240;     /* Papel #F2F2F0 */
+    --brand-deep-amber: 184 135 26; /* Âmbar profundo #B8871A */
+    --ui-surface: 34 34 34;
+    --ui-on-accent: 26 26 26;
+    --ui-scroll: 92 92 92;
+    --ui-scroll-hover: 137 137 133;
+    --ui-slate-50: 26 26 26;
+    --ui-slate-100: 39 39 39;
+    --ui-slate-200: 54 54 54;
+    --ui-slate-300: 92 92 92;
+    --ui-slate-400: 151 151 147;
+    --ui-slate-500: 177 177 172;
+    --ui-slate-600: 196 196 191;
+    --ui-slate-700: 216 216 211;
+    --ui-slate-800: 230 230 226;
+    --ui-slate-900: 242 242 240;
+    --ui-blue-50: 48 39 23;
+    --ui-blue-100: 67 51 25;
+    --ui-blue-200: 99 76 29;
+    --ui-blue-300: 184 135 26;
+    --ui-blue-400: 230 171 36;
+    --ui-blue-500: 255 199 52;
+    --ui-blue-600: 255 199 52;
+    --ui-blue-700: 255 199 52;
+    --ui-blue-800: 255 215 109;
+    --ui-blue-900: 255 230 157;
+    --ui-blue-950: 35 31 24;
   }
-
-  * {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  :root[data-theme='light'] {
+    color-scheme: light;
+    --ui-surface: 255 255 255;
+    --ui-on-accent: 26 26 26;
+    --ui-scroll: 170 170 165;
+    --ui-scroll-hover: 92 92 92;
+    --ui-slate-50: 242 242 240;
+    --ui-slate-100: 232 232 228;
+    --ui-slate-200: 212 212 207;
+    --ui-slate-300: 178 178 173;
+    --ui-slate-400: 116 116 113;
+    --ui-slate-500: 92 92 92;
+    --ui-slate-600: 80 80 80;
+    --ui-slate-700: 66 66 66;
+    --ui-slate-800: 45 45 45;
+    --ui-slate-900: 26 26 26;
+    --ui-blue-50: 255 249 231;
+    --ui-blue-100: 255 239 195;
+    --ui-blue-200: 246 220 150;
+    --ui-blue-300: 255 199 52;
+    --ui-blue-400: 220 163 33;
+    --ui-blue-500: 184 135 26;
+    --ui-blue-600: 184 135 26;
+    --ui-blue-700: 121 85 12;
+    --ui-blue-800: 104 73 12;
+    --ui-blue-900: 82 58 14;
+    --ui-blue-950: 49 37 18;
   }
-
-  body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    @apply bg-slate-50 text-slate-900;
-  }
-
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
-  }
+  * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; @apply bg-slate-50 text-slate-900; }
+  h1, h2, h3, h4, h5, h6 { @apply font-semibold tracking-tight; }
+  input, textarea, select { color: rgb(var(--ui-slate-900)); background-color: rgb(var(--ui-surface)); }
+  input::placeholder, textarea::placeholder { color: rgb(var(--ui-slate-400)); }
+  /* A imagem QR deve ficar sobre superfície clara para leitura. */
+  img[alt='QR Code da instância Evolution'] { background-color: #F2F2F0; }
 }
 
 @layer components {
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-all hover:bg-slate-50 active:scale-[0.98] disabled:opacity-50;
-  }
-
-  .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] disabled:opacity-50;
-  }
-
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900;
-  }
-
-  .input {
-    @apply block w-full rounded-lg border-0 py-2.5 px-3.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 transition-all text-sm;
-  }
-
-  .input-error {
-    @apply ring-red-400 focus:ring-red-500;
-  }
-
-  .label {
-    @apply block text-sm font-medium leading-6 text-slate-700 mb-1.5;
-  }
-
-  .card {
-    @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200/80;
-  }
-
-  .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
-  }
-
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-brand-on-accent shadow-sm transition-all hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-all hover:bg-slate-100 active:scale-[0.98] disabled:opacity-50; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] disabled:opacity-50; }
+  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900; }
+  .input { @apply block w-full rounded-lg border-0 py-2.5 px-3.5 bg-white text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 transition-all text-sm; }
+  .input-error { @apply ring-red-400 focus:ring-red-500; }
+  .label { @apply block text-sm font-medium leading-6 text-slate-700 mb-1.5; }
+  .card { @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200/80; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
   .badge-blue { @apply bg-blue-50 text-blue-700 ring-1 ring-blue-200; }
   .badge-green { @apply bg-green-50 text-green-700 ring-1 ring-green-200; }
   .badge-yellow { @apply bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200; }
   .badge-red { @apply bg-red-50 text-red-700 ring-1 ring-red-200; }
   .badge-gray { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
   .badge-purple { @apply bg-pink-50 text-pink-700 ring-1 ring-pink-200; }
-
-  .sidebar-item {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 cursor-pointer;
-  }
-
-  .sidebar-item-active {
-    @apply bg-blue-50 text-blue-700 hover:bg-blue-50 hover:text-blue-700;
-  }
+  .sidebar-item { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 cursor-pointer; }
+  .sidebar-item-active { @apply bg-blue-50 text-blue-700 hover:bg-blue-50 hover:text-blue-700; }
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(var(--ui-scroll)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--ui-scroll-hover)); }
+
+/* Badges de estado conservam significado (sucesso/erro/alerta),
+   mas usam fundos adequados ao contraste do tema escuro. */
+:root[data-theme='dark'] :is(.bg-green-50, .bg-green-100, .bg-emerald-50, .bg-emerald-100) { background-color: #20332A; }
+:root[data-theme='dark'] :is(.bg-red-50, .bg-red-100) { background-color: #3C2626; }
+:root[data-theme='dark'] :is(.bg-yellow-50, .bg-yellow-100, .bg-amber-50, .bg-amber-100) { background-color: #40351F; }
+:root[data-theme='dark'] :is(.bg-purple-50, .bg-purple-100, .bg-pink-50, .bg-pink-100, .bg-indigo-50, .bg-indigo-100) { background-color: #332C3A; }
+:root[data-theme='dark'] :is(.bg-orange-50, .bg-orange-100) { background-color: #3E3025; }
+:root[data-theme='dark'] :is(.bg-teal-50, .bg-teal-100) { background-color: #203637; }
+:root[data-theme='dark'] :is(.text-green-600, .text-green-700, .text-green-800) { color: #8CDCAC; }
+:root[data-theme='dark'] :is(.text-red-600, .text-red-700, .text-red-800) { color: #FFAAAA; }
+:root[data-theme='dark'] :is(.text-yellow-600, .text-yellow-700, .text-yellow-800, .text-amber-700, .text-amber-800, .text-amber-900) { color: #FFC734; }
+:root[data-theme='dark'] :is(.text-purple-600, .text-purple-700, .text-purple-900, .text-pink-600, .text-pink-700, .text-indigo-600, .text-indigo-700) { color: #D9B9EE; }
+:root[data-theme='dark'] :is(.text-orange-600, .text-orange-700) { color: #FBC29A; }
+:root[data-theme='dark'] :is(.text-teal-600, .text-teal-700) { color: #91E0D4; }

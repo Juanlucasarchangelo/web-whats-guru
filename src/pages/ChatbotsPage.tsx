@@ -344,7 +344,7 @@ export function ChatbotsPage() {
 
           {/* Canvas */}
           <div className="flex-1 overflow-auto bg-slate-50 relative" style={{
-            backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(circle, rgb(var(--ui-slate-300)) 1px, transparent 1px)',
             backgroundSize: '20px 20px',
           }}>
             <div className="relative" style={{ minWidth: '800px', minHeight: '600px' }}>
@@ -364,7 +364,7 @@ export function ChatbotsPage() {
                       <path
                         d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                         fill="none"
-                        stroke="#94a3b8"
+                        stroke="currentColor"
                         strokeWidth="2"
                         markerEnd="url(#arrowhead)"
                       />
@@ -373,7 +373,7 @@ export function ChatbotsPage() {
                 })}
                 <defs>
                   <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" />
+                    <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
                   </marker>
                 </defs>
               </svg>

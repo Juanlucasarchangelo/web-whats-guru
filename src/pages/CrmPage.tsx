@@ -30,7 +30,7 @@ export function CrmPage() {
  const [tagModal,setTagModal] = useState(false);
  const [tagEditing,setTagEditing] = useState<Tag|null>(null);
  const [tagName,setTagName] = useState('');
- const [tagColor,setTagColor] = useState('#3b82f6');
+ const [tagColor,setTagColor] = useState('#FFC734');
 
  const load = useCallback(async (silent=false) => {
   if(!currentOrg?.id)return;
@@ -85,7 +85,7 @@ export function CrmPage() {
    setNewOpen(false);setNewLead({name:'',phone:'',email:'',crm_value:'0',tag_id:''});toastSuccess('Oportunidade criada.');await load(true);
   }catch(e){toastError(e instanceof Error?e.message:'Erro ao criar contato');}finally{setSaving(false);}
  }
- function openTag(tag?:Tag){setTagEditing(tag||null);setTagName(tag?.name||'');setTagColor(tag?.color||'#3b82f6');setTagModal(true);}
+ function openTag(tag?:Tag){setTagEditing(tag||null);setTagName(tag?.name||'');setTagColor(tag?.color||'#FFC734');setTagModal(true);}
  async function saveTag(){if(!currentOrg?.id||!tagName.trim())return toastError('Informe o nome da etiqueta.');if(tags.some(t=>t.name.toLowerCase()===tagName.trim().toLowerCase()&&t.id!==tagEditing?.id))return toastError('Essa etiqueta já existe.');setSaving(true);
   try{const payload={name:tagName.trim(),color:tagColor};const r=tagEditing?await supabase.from('tags').update(payload).eq('id',tagEditing.id):await supabase.from('tags').insert({...payload,org_id:currentOrg.id});if(r.error)throw r.error;setTagModal(false);toastSuccess(tagEditing?'Etiqueta atualizada.':'Coluna criada.');await load(true);}
   catch(e){toastError(e instanceof Error?e.message:'Erro ao salvar etiqueta');}finally{setSaving(false);}
@@ -93,7 +93,7 @@ export function CrmPage() {
  async function deleteTag(tag:Tag){if(!window.confirm(`Excluir a etiqueta "${tag.name}"? Ela será removida dos contatos e conversas, mas nenhum histórico será excluído.`))return;
   const r=await supabase.from('tags').delete().eq('id',tag.id);if(r.error)return toastError(r.error.message);toastSuccess('Etiqueta excluída.');await load(true);
  }
- const columns=[{id:'none',name:'Sem etiqueta',color:'#94a3b8'},...tags.map(t=>({id:t.id,name:t.name,color:t.color}))];
+ const columns=[{id:'none',name:'Sem etiqueta',color:'#5C5C5C'},...tags.map(t=>({id:t.id,name:t.name,color:t.color}))];
  return <div className="p-4 lg:p-6 h-full flex flex-col gap-4">
   <div className="flex flex-wrap items-center justify-between gap-2"><div><h1 className="text-2xl font-bold text-slate-900">CRM Kanban</h1><p className="text-sm text-slate-500">{filtered.length} contato(s) · Valor estimado: {brl(total)}</p></div><div className="flex flex-wrap gap-2"><button className="btn-secondary" onClick={()=>void load()}><RefreshCw size={16}/> Atualizar</button><button className="btn-secondary" onClick={()=>openTag()}><Tags size={16}/> Nova etiqueta</button><button className="btn-primary" onClick={()=>setNewOpen(true)}><Plus size={16}/> Nova oportunidade</button></div></div>
   <div className="flex gap-2 items-center bg-white border border-slate-200 rounded-lg px-3 max-w-lg"><Search size={17} className="text-slate-400"/><input className="py-2.5 outline-none flex-1 text-sm" placeholder="Buscar contato" value={search} onChange={e=>setSearch(e.target.value)}/></div>

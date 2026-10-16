@@ -38,13 +38,13 @@ export function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30 mb-4">
-            <MessageCircle className="text-white" size={28} />
+            <MessageCircle className="text-brand-on-accent" size={28} />
           </div>
-          <h1 className="text-2xl font-bold text-white">Converso</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Converso</h1>
           <p className="text-sm text-slate-400 mt-1">Atendimento multicanal, CRM e automação</p>
         </div>
 
