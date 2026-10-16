@@ -663,7 +663,7 @@ export function InboxPage() {
                   <div key={msg.id} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                       isAgent
-                        ? msg.is_bot ? 'bg-purple-100 text-purple-900' : 'bg-blue-600 text-white'
+                        ? msg.is_bot ? 'bg-purple-100 text-purple-900' : 'bg-blue-600 text-brand-on-accent'
                         : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-100'
                     }`}>
                       {msg.is_bot && (

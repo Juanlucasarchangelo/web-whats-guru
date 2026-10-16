@@ -4,7 +4,7 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, Shield, UserRound,
+  LogOut, Menu, X, Shield, UserRound, Moon, Sun,
 } from 'lucide-react';
 
 export type PageId =
@@ -37,6 +37,17 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
   const { currentOrg, currentMembership, organizations, switchOrganization } = useOrg();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // Preferência local da interface: tema escuro por padrão.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  );
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('whats-guru-theme', next); } catch { /* armazenamento indisponível */ }
+    setTheme(next);
+  }
 
   const isAdmin = currentMembership?.role === 'owner' || currentMembership?.role === 'admin';
 
@@ -67,7 +78,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
         <div className="flex items-center justify-between h-16 px-5 border-b border-slate-100">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 shadow-sm shadow-blue-600/20">
-              <MessageCircle className="text-white" size={20} />
+              <MessageCircle className="text-brand-on-accent" size={20} />
             </div>
             <span className="text-lg font-bold text-slate-900">Fala Comigo</span>
           </div>
@@ -137,6 +148,15 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
               ><UserRound size={16} />Meu perfil</button>
               <button
+                type="button"
+                onClick={toggleTheme}
+                aria-label={`Ativar tema ${theme === 'dark' ? 'claro' : 'escuro'}`}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                Tema {theme === 'dark' ? 'claro' : 'escuro'}
+              </button>
+              <button
                 onClick={handleSignOut}
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
               >
@@ -157,7 +177,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           </button>
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600">
-              <MessageCircle className="text-white" size={16} />
+              <MessageCircle className="text-brand-on-accent" size={16} />
             </div>
             <span className="font-bold text-slate-900">Converso</span>
           </div>
