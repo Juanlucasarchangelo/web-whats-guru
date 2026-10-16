@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
 import { sendEvolutionText } from './evolution.js';
+import { getOrCreateConversation, withConversationIdentityLock } from './conversation-thread.js';
 
 import { validPhone, hasMarketingConsent } from './operations-policy.js';
 export { validPhone, hasMarketingConsent } from './operations-policy.js';
@@ -18,17 +19,12 @@ export async function ensureChannel(orgId, integrationId) {
   return row;
 }
 
-async function getOrCreateConversation(tx, orgId, contactId, integrationId) {
-  const existing=await tx.conversation.findFirst({where:{org_id:orgId,contact_id:contactId,channel:'whatsapp',integration_id:integrationId},orderBy:{last_message_at:'desc'}});
-  if(existing)return existing;
-  return tx.conversation.create({data:{id:randomUUID(),org_id:orgId,contact_id:contactId,channel:'whatsapp',integration_id:integrationId,status:'open'}});
-}
-
 async function deliver({orgId,contactId,integrationId,text,userId}) {
   const contact=await prisma.contact.findFirst({where:{id:contactId,org_id:orgId}});
   if(!contact||!validPhone(contact.phone))throw new Error('Contato sem telefone com DDI valido.');
   await ensureChannel(orgId,integrationId);
-  const conversation=await prisma.$transaction(tx=>getOrCreateConversation(tx,orgId,contactId,integrationId));
+  const {conversation}=await withConversationIdentityLock({orgId,contactId,integrationId,phone:contact.phone},
+    () => getOrCreateConversation(prisma,{orgId,contactId,integrationId}));
   return sendEvolutionText({orgId,conversation,text,userId});
 }
 

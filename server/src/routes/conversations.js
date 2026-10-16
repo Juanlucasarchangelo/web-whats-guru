@@ -6,6 +6,7 @@ import { HttpError, wrap } from '../http.js';
 import { sendTextToWhatsApp } from '../services/whatsapp.js';
 import { loadEvolution, sendEvolutionText, syncEvolutionConversation } from '../services/evolution.js';
 import { visibleChannelIds, conversationScope, requireConversation } from '../services/channel-access.js';
+import { getOrCreateConversation, withConversationIdentityLock } from '../services/conversation-thread.js';
 
 const idParam = z.string().uuid();
 const newConversation = z.object({
@@ -32,7 +33,7 @@ export function conversationsRouter() {
   }));
   router.post('/', wrap(async (req, res) => {
     const input = newConversation.parse(req.body);
-    const contact = await prisma.contact.findFirst({ where: { id: input.contact_id, org_id: req.orgId }, select: { id: true } });
+    const contact = await prisma.contact.findFirst({ where: { id: input.contact_id, org_id: req.orgId }, select: { id: true, phone: true } });
     if (!contact) throw new HttpError(404, 'Contato nao encontrado nesta organizacao.');
     let integrationId = null;
     if(input.channel==='whatsapp') {
@@ -40,11 +41,32 @@ export function conversationsRouter() {
       integrationId=input.integration_id ?? (channels.length===1 ? channels[0] : null);
       if(!integrationId || !channels.includes(integrationId))throw new HttpError(400,'Selecione um numero de WhatsApp autorizado para iniciar a conversa.');
     }
-    const conversation = await prisma.conversation.create({ data: {
-      id: randomUUID(), org_id: req.orgId, contact_id: input.contact_id, integration_id: integrationId,
-      channel: input.channel, subject: input.subject ?? null, status: 'open',
-    } });
-    res.status(201).json(conversation);
+    if (input.channel !== 'whatsapp') {
+      // Leave other channels untouched; this fix concerns WhatsApp histories.
+      const conversation = await prisma.conversation.create({ data: {
+        id: randomUUID(), org_id: req.orgId, contact_id: contact.id,
+        channel: input.channel, subject: input.subject ?? null, status: 'open',
+      } });
+      return res.status(201).json(conversation);
+    }
+    // Opening a WhatsApp thread manually must not create another history for
+    // the same contact and WhatsApp number, even if it was closed.
+    const { conversation, created } = await withConversationIdentityLock({
+      orgId: req.orgId, integrationId, contactId: contact.id, phone: contact.phone,
+      channel: input.channel,
+    }, async () => {
+      const result = await getOrCreateConversation(prisma, {
+        orgId: req.orgId, contactId: contact.id, integrationId,
+        channel: input.channel, subject: input.subject ?? null,
+      });
+      if (!result.created && ['closed', 'resolved'].includes(result.conversation.status)) {
+        result.conversation = await prisma.conversation.update({
+          where: { id: result.conversation.id }, data: { status: 'open' },
+        });
+      }
+      return result;
+    });
+    res.status(created ? 201 : 200).json(conversation);
   }));
   router.patch('/:id', wrap(async (req, res) => {
     const id = idParam.parse(req.params.id);

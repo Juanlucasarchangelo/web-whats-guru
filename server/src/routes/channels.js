@@ -5,6 +5,7 @@ import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { encrypt, providerUrl, providerFetch } from './integrations-restore.js';
 import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus } from '../services/evolution.js';
+import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
 import { visibleChannelIds, admin } from '../services/channel-access.js';
 const id=z.string().uuid();
 const checkAdmin=req=>{if(!admin(req))throw new HttpError(403,'Somente administradores podem configurar numeros.');};
@@ -20,7 +21,18 @@ export function channelsRouter(){
  router.get('/',wrap(async(req,res)=>{
   const ids=await visibleChannelIds(req);
   const rows=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp',id:{in:ids}},orderBy:{created_at:'asc'}});
-  res.json({data:rows.map(safe)});
+  // Show the real Evolution state, not a cached status changed only in MySQL.
+  const data=await Promise.all(rows.map(async row=>{
+    if(row.config?.provider!=='evolution_api')return safe(row);
+    try{
+      const state=await syncEvolutionStatus(req.orgId,row.id);
+      return {...safe(row),status:state?.status??row.status,status_error:null};
+    }catch(error){
+      console.warn('[Channels] Falha ao consultar estado:',{id:row.id,error:error.message});
+      return {...safe(row),status_error:'Nao foi possivel consultar a Evolution agora.'};
+    }
+  }));
+  res.json({data});
  }));
  router.post('/attach',wrap(async(req,res)=>{
   checkAdmin(req);
@@ -47,6 +59,36 @@ export function channelsRouter(){
   try {webhook=await configureEvolutionWebhook(req.orgId,webhookEndpoint(),integration.id);}
   catch(error){webhook={ok:false,error:String(error.message).slice(0,200)};console.warn('[Channels] Webhook nao configurado:',{instance:data.instance_name,error:error.message});}
   res.status(201).json({channel:safe(integration),webhook});
+ }));
+ router.post('/:id/qr',wrap(async(req,res)=>{
+  checkAdmin(req);const integrationId=id.parse(req.params.id);
+  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
+  res.set('Cache-Control','no-store');
+  res.json(await getEvolutionConnectionQr(req.orgId,integrationId));
+ }));
+ router.post('/:id/logout',wrap(async(req,res)=>{
+  checkAdmin(req);const integrationId=id.parse(req.params.id);
+  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
+  const confirmation=z.object({confirm_instance:z.string()}).strict().parse(req.body);
+  if(confirmation.confirm_instance!==row.config.instance_name)throw new HttpError(400,'Confirmacao de instancia incorreta.');
+  res.json(await logoutEvolutionChannel(req.orgId,integrationId));
+ }));
+ router.patch('/:id/name',wrap(async(req,res)=>{
+  checkAdmin(req);const integrationId=id.parse(req.params.id);
+  const data=z.object({name:z.string().trim().min(2).max(100)}).strict().parse(req.body);
+  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
+  const result=await prisma.integration.update({where:{id:row.id},data:{name:data.name}});
+  res.json({channel:safe(result)});
+ }));
+ router.get('/:id/webhook',wrap(async(req,res)=>{
+  const integrationId=id.parse(req.params.id);
+  if(!(await visibleChannelIds(req)).includes(integrationId))throw new HttpError(404,'Instancia sem acesso.');
+  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
+  res.json({webhook:await getEvolutionWebhookInfo(req.orgId,integrationId)});
  }));
  router.post('/:id/webhook',wrap(async(req,res)=>{
   checkAdmin(req);const integrationId=id.parse(req.params.id);

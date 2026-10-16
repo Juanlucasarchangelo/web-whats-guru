@@ -1,24 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
 import { apiRequest } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { toastSuccess, toastError } from '@/components/ui/Toast';
-import type { Contact } from '@/types';
+import type { Contact, Tag } from '@/types';
 import {
   Users, Search, Plus, Pencil, Trash2, Mail, Phone,
   DollarSign, Building2,
 } from 'lucide-react';
 
-const CRM_STAGES = [
-  { value: 'lead', label: 'Lead' },
-  { value: 'qualified', label: 'Qualificado' },
-  { value: 'negotiation', label: 'Negociação' },
-  { value: 'won', label: 'Ganho' },
-  { value: 'lost', label: 'Perdido' },
-];
+type ContactTagLink = { contact_id: string; tag_id: string };
 
 export function ContactsPage() {
   const { currentOrg } = useOrg();
@@ -27,7 +22,10 @@ export function ContactsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [stageFilter, setStageFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('all');
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [contactTags, setContactTags] = useState<ContactTagLink[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Contact | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
@@ -53,6 +51,15 @@ export function ContactsPage() {
         custom_fields: contact.custom_fields ?? {},
       })));
       setTotal(response.total);
+      // Mesmas tabelas usadas pelo CRM Kanban e pela Caixa de Entrada.
+      const [tagsResult, linksResult] = await Promise.all([
+        supabase.from('tags').select('*').eq('org_id', orgId).order('name', { ascending: true }),
+        supabase.from('contact_tags').select('contact_id,tag_id').limit(1000),
+      ]);
+      if (tagsResult.error) throw tagsResult.error;
+      if (linksResult.error) throw linksResult.error;
+      setTags((tagsResult.data ?? []) as Tag[]);
+      setContactTags((linksResult.data ?? []) as ContactTagLink[]);
     } catch (error) {
       toastError(error instanceof Error ? error.message : 'Erro ao carregar contatos do MySQL');
     } finally {
@@ -65,11 +72,13 @@ export function ContactsPage() {
   function openCreate() {
     setEditing(null);
     setForm({ name: '', email: '', phone: '', crm_stage: 'lead', crm_value: '0' });
+    setSelectedTagIds([]);
     setShowModal(true);
   }
 
   function openEdit(contact: Contact) {
     setEditing(contact);
+    setSelectedTagIds(contactTags.filter(link => link.contact_id === contact.id).map(link => link.tag_id));
     setForm({
       name: contact.name,
       email: contact.email ?? '',
@@ -92,17 +101,35 @@ export function ContactsPage() {
         crm_value: parseFloat(form.crm_value) || 0,
       };
 
+      let contactId: string;
       if (editing) {
         await apiRequest(`/contacts/${editing.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-        toastSuccess('Contato atualizado');
+        contactId = editing.id;
       } else {
-        await apiRequest('/contacts', { method: 'POST', body: JSON.stringify(payload) });
-        toastSuccess('Contato criado');
+        const created = await apiRequest<Contact>('/contacts', { method: 'POST', body: JSON.stringify(payload) });
+        contactId = created.id;
       }
+      // Alteracoes em contact_tags espelham automaticamente as etiquetas
+      // para todas as conversas deste contato (regra do backend existente).
+      const oldIds = new Set(editing ? contactTags.filter(link => link.contact_id === editing.id).map(link => link.tag_id) : []);
+      const newIds = new Set(selectedTagIds);
+      for (const id of oldIds) {
+        if (!newIds.has(id)) {
+          const result = await supabase.from('contact_tags').delete().eq('contact_id', contactId).eq('tag_id', id);
+          if (result.error) throw result.error;
+        }
+      }
+      for (const id of newIds) {
+        if (!oldIds.has(id)) {
+          const result = await supabase.from('contact_tags').insert({ contact_id: contactId, tag_id: id });
+          if (result.error) throw result.error;
+        }
+      }
+      toastSuccess(editing ? 'Contato e etiquetas atualizados' : 'Contato criado com etiquetas');
       setShowModal(false);
       await load();
     } catch (error) {
-      toastError(error instanceof Error ? error.message : 'Erro ao salvar contato');
+      toastError(error instanceof Error ? error.message : 'Erro ao salvar contato ou sincronizar etiquetas. Atualize a tela para conferir o resultado');
     } finally {
       setSaving(false);
     }
@@ -121,19 +148,11 @@ export function ContactsPage() {
     }
   }
 
+  const idsOf = (contactId: string) => contactTags.filter(link => link.contact_id === contactId).map(link => link.tag_id);
   const visibleContacts = contacts.filter((contact) =>
-    (stageFilter === 'all' || contact.crm_stage === stageFilter)
+    (tagFilter === 'all' || (tagFilter === 'none' ? idsOf(contact.id).length === 0 : idsOf(contact.id).includes(tagFilter)))
     && contact.name.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR')),
   );
-
-  const stageLabel = (s: string) => CRM_STAGES.find(st => st.value === s)?.label ?? s;
-  const stageBadge = (s: string) => {
-    const map: Record<string, string> = {
-      lead: 'badge-blue', qualified: 'badge-yellow', negotiation: 'badge-purple',
-      won: 'badge-green', lost: 'badge-red',
-    };
-    return map[s] ?? 'badge-gray';
-  };
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -160,12 +179,13 @@ export function ContactsPage() {
           />
         </div>
         <select
-          value={stageFilter}
-          onChange={(e) => setStageFilter(e.target.value)}
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
           className="input sm:w-48"
         >
-          <option value="all">Todos os estágios</option>
-          {CRM_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          <option value="all">Todas as etiquetas</option>
+          <option value="none">Sem etiqueta</option>
+          {tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
         </select>
       </div>
 
@@ -197,9 +217,14 @@ export function ContactsPage() {
                   </div>
                   <div>
                     <p className="font-medium text-slate-900">{contact.name}</p>
-                    <span className={`badge ${stageBadge(contact.crm_stage)} mt-1`}>
-                      {stageLabel(contact.crm_stage)}
-                    </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {tags.filter(tag => idsOf(contact.id).includes(tag.id)).map(tag => (
+                        <span key={tag.id} className="badge badge-gray" style={{ borderColor: tag.color, color: tag.color }}>
+                          {tag.name}
+                        </span>
+                      ))}
+                      {idsOf(contact.id).length === 0 && <span className="text-xs text-slate-400">Sem etiqueta</span>}
+                    </div>
                   </div>
                 </div>
                 {contact.is_demo && <span className="badge badge-gray text-[10px]">Demo</span>}
@@ -279,14 +304,19 @@ export function ContactsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Estágio do CRM</label>
-              <select
-                value={form.crm_stage}
-                onChange={(e) => setForm({ ...form, crm_stage: e.target.value })}
-                className="input"
-              >
-                {CRM_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
+              <label className="label">Etiquetas / Colunas do Kanban</label>
+              <div className="border border-slate-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
+                {tags.length === 0 ? (
+                  <span className="text-xs text-slate-500">Nenhuma etiqueta cadastrada. Crie uma no CRM Kanban.</span>
+                ) : tags.map(tag => (
+                  <label key={tag.id} className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer">
+                    <input type="checkbox" checked={selectedTagIds.includes(tag.id)} onChange={e =>
+                      setSelectedTagIds(ids => e.target.checked ? [...ids, tag.id] : ids.filter(id => id !== tag.id))
+                    } />
+                    <span style={{ color: tag.color }}>●</span> {tag.name}
+                  </label>
+                ))}
+              </div>
             </div>
             <div>
               <label className="label">Valor (R$)</label>

@@ -17,8 +17,8 @@ import {
 const INTEGRATION_TYPES = [
   {
     type: 'whatsapp',
-    name: 'WhatsApp Business Platform',
-    description: 'Conecte à API oficial do WhatsApp para enviar e receber mensagens.',
+    name: 'WhatsApp Oficial (Meta Cloud API)',
+    description: 'Use a API oficial da Meta. Os números conectados pela Evolution são gerenciados acima.',
     icon: MessageCircle,
     color: 'bg-green-100 text-green-700',
     docs: 'https://developers.facebook.com/docs/whatsapp/whatsapp-business-platform',
@@ -33,8 +33,8 @@ const INTEGRATION_TYPES = [
   },
   {
     type: 'webhook',
-    name: 'Webhook',
-    description: 'Receba eventos em tempo real no seu endpoint via webhook.',
+    name: 'Webhook externo (avançado)',
+    description: 'Configure um endpoint externo independente do recebimento da Evolution.',
     icon: Webhook,
     color: 'bg-pink-100 text-pink-700',
     docs: 'https://docs.evolution-api.com/',
@@ -53,7 +53,7 @@ export function SettingsPage() {
   const [configType, setConfigType] = useState<string | null>(null);
   const [configForm, setConfigForm] = useState<Record<string, string>>({});
   const [whatsappSaving, setWhatsappSaving] = useState(false);
-  const [whatsappResult, setWhatsappResult] = useState<{ verifyToken: string; phoneNumber: string; verifiedName: string; qrCode?: string } | null>(null);
+  const [whatsappResult, setWhatsappResult] = useState<{ verifyToken: string; phoneNumber: string; verifiedName: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -82,7 +82,7 @@ export function SettingsPage() {
   }
 
   function openConfig(integType: string) {
-    const existing = integrations.find(i => i.type === integType);
+    const existing = integrations.find(i => i.type === integType && (integType !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));
     setShowConfigModal(existing ?? null);
     setConfigType(integType);
     setWhatsappResult(null);
@@ -106,8 +106,8 @@ export function SettingsPage() {
     setConfigForm(form);
   }
 
-  async function callWhatsAppApi(action: 'connect' | 'disconnect' | 'connect_unofficial', payload: Record<string, unknown>) {
-    return apiRequest<any>('/integrations/whatsapp', { method: 'POST', body: JSON.stringify({ ...payload, action }) });
+  async function callWhatsAppApi(action: 'connect' | 'disconnect', payload: Record<string, unknown>) {
+    return apiRequest<Record<string, any>>('/integrations/whatsapp', { method: 'POST', body: JSON.stringify({ ...payload, action }) });
   }
 
   async function callIntegrationApi(payload: Record<string, unknown>) {
@@ -141,39 +141,14 @@ export function SettingsPage() {
     }
   }
 
-  async function handleSaveUnofficialWhatsApp() {
-    if (!orgId || configType !== 'whatsapp') return;
-    setWhatsappSaving(true);
-    try {
-      const result = await callWhatsAppApi('connect_unofficial', {
-        org_id: orgId,
-        provider_url: configForm.provider_url,
-        instance_name: configForm.instance_name,
-        api_key: configForm.api_key,
-      });
-
-      setWhatsappResult({
-        verifyToken: '',
-        phoneNumber: '',
-        verifiedName: 'Evolution API',
-        qrCode: result.qr_code,
-      });
-      toastSuccess(result.qr_code ? 'QR Code gerado. Escaneie pelo WhatsApp.' : 'Instância criada. Verifique a conexão no Evolution API.');
-      load();
-    } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Erro ao gerar QR Code');
-    } finally {
-      setWhatsappSaving(false);
-    }
-  }
-
   async function handleDisconnectWhatsApp(integrationId?: string) {
     if (!orgId) return;
     setWhatsappSaving(true);
     try {
       await callWhatsAppApi('disconnect', { org_id: orgId, integration_id: integrationId });
-      toastSuccess('WhatsApp desconectado');
+      toastSuccess('Integração oficial desativada no Whats-Guru.');
       setShowConfigModal(null);
+      setConfigType(null);
       load();
     } catch {
       toastError('Erro ao desconectar WhatsApp');
@@ -205,8 +180,7 @@ export function SettingsPage() {
 
   async function handleDisconnect(integ: Integration) {
     if (integ.type === 'whatsapp') {
-      setShowConfigModal(integ);
-      setConfigType('whatsapp');
+      if (!window.confirm('Desativar esta integração oficial da Meta no Whats-Guru? Isso não revoga o token na Meta.')) return;
       await handleDisconnectWhatsApp(integ.id);
       return;
     }
@@ -235,7 +209,7 @@ export function SettingsPage() {
 
   if (loading) return <div className="flex justify-center py-12"><Spinner size={32} /></div>;
 
-  const whatsappIntegration = integrations.find(i => i.type === 'whatsapp');
+  const whatsappIntegration = integrations.find(i => i.type === 'whatsapp' && (i.config as Record<string, unknown>)?.connection_mode === 'official');
   const whatsappConnected = whatsappIntegration?.status === 'connected';
   const whatsappDisplayPhone = getConfigValue(whatsappIntegration, 'display_phone_number');
   const whatsappVerifiedName = getConfigValue(whatsappIntegration, 'verified_name');
@@ -288,7 +262,7 @@ export function SettingsPage() {
           <ChannelsPanel canManage={currentMembership?.role==='owner'||currentMembership?.role==='admin'} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
-            const existing = integrations.find(i => i.type === integType.type);
+            const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));
             return (
               <div key={integType.type} className="card p-5">
                 <div className="flex items-start justify-between">
@@ -299,7 +273,7 @@ export function SettingsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="font-semibold text-slate-900">{integType.name}</p>
-                        {existing && getStatusBadge(existing.status)}
+                        {existing ? getStatusBadge(existing.status) : integType.type === 'whatsapp' ? <span className="badge badge-gray">Não configurada</span> : null}
                       </div>
                       <p className="text-sm text-slate-500">{integType.description}</p>
                       {integType.type === 'whatsapp' && whatsappConnected && whatsappDisplayPhone && (
@@ -335,14 +309,14 @@ export function SettingsPage() {
           })}
 
           {/* Webhook URL info */}
-          <div className="card p-5">
+          {whatsappIntegration && <div className="card p-5">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 flex-shrink-0">
                 <Webhook size={24} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-slate-900 mb-1">URL do Webhook</p>
-                <p className="text-sm text-slate-500 mb-2">Use esta URL para receber webhooks do WhatsApp e outros serviços.</p>
+                <p className="font-semibold text-slate-900 mb-1">Webhook da Meta Cloud API</p>
+                <p className="text-sm text-slate-500 mb-2">Esta URL é usada apenas pela API oficial da Meta; a Evolution configura o recebimento por instância no painel acima.</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs bg-slate-100 rounded-lg px-3 py-2 text-slate-700 truncate">{webhookUrl}</code>
                   <button
@@ -357,7 +331,7 @@ export function SettingsPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -436,25 +410,17 @@ export function SettingsPage() {
                   <div className="rounded-lg bg-green-50 ring-1 ring-green-200 p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <CheckCircle size={20} className="text-green-600" />
-                      <p className="text-sm font-semibold text-green-800">{whatsappResult.qrCode ? 'Escaneie o QR Code para conectar' : 'WhatsApp conectado!'}</p>
+                      <p className="text-sm font-semibold text-green-800">WhatsApp oficial configurado!</p>
                     </div>
-                    {whatsappResult.qrCode ? (
-                      <div className="mt-3 flex justify-center rounded-lg bg-white p-4">
-                        <img src={whatsappResult.qrCode} alt="QR Code para conectar o WhatsApp" className="h-64 w-64 object-contain" />
-                      </div>
-                    ) : (
-                      <>
-                        {whatsappResult.phoneNumber && (
-                          <p className="text-sm text-green-700">Numero: +{whatsappResult.phoneNumber}</p>
-                        )}
-                        {whatsappResult.verifiedName && (
-                          <p className="text-sm text-green-700">Nome verificado: {whatsappResult.verifiedName}</p>
-                        )}
-                      </>
+                    {whatsappResult.phoneNumber && (
+                      <p className="text-sm text-green-700">Número: +{whatsappResult.phoneNumber}</p>
+                    )}
+                    {whatsappResult.verifiedName && (
+                      <p className="text-sm text-green-700">Nome verificado: {whatsappResult.verifiedName}</p>
                     )}
                   </div>
 
-                  {!whatsappResult.qrCode && <div className="rounded-lg bg-blue-50 ring-1 ring-blue-200 p-4 space-y-3">
+                  <div className="rounded-lg bg-blue-50 ring-1 ring-blue-200 p-4 space-y-3">
                     <div>
                       <p className="text-sm font-medium text-blue-900 mb-1">Passo final: configure o webhook na Meta</p>
                       <p className="text-xs text-blue-700">
@@ -486,7 +452,7 @@ export function SettingsPage() {
                         </button>
                       </div>
                     </div>
-                  </div>}
+                  </div>
 
                   <div className="flex justify-end pt-2">
                     <button onClick={() => { setShowConfigModal(null); setConfigType(null); }} className="btn-primary">Concluir</button>
@@ -494,19 +460,8 @@ export function SettingsPage() {
                 </div>
               ) : (
                 <>
-                  <div>
-                    <label className="label">Tipo de conexão</label>
-                    <select
-                      value={configForm.connection_mode ?? 'official'}
-                      onChange={(e) => setConfigForm({ ...configForm, connection_mode: e.target.value })}
-                      className="input"
-                    >
-                      <option value="official">API oficial da Meta</option>
-                      <option value="unofficial">API não oficial com QR Code</option>
-                    </select>
-                  </div>
+                  <p className="text-sm text-slate-500">Esta área é exclusiva da API oficial da Meta. Para conectar outra instância Evolution, use o painel acima.</p>
 
-                  {configForm.connection_mode === 'official' && <>
                   <div>
                     <label className="label">Phone Number ID</label>
                     <input type="text" value={configForm.phone_number_id ?? ''} onChange={(e) => setConfigForm({ ...configForm, phone_number_id: e.target.value })} className="input" placeholder="Ex: 123456789" />
@@ -545,39 +500,7 @@ export function SettingsPage() {
                       {whatsappSaving ? 'Conectando...' : 'Conectar WhatsApp'}
                     </button>
                   </div>
-                  </>}
 
-                  {configForm.connection_mode === 'unofficial' && <>
-                    <div>
-                      <label className="label">URL do Evolution API</label>
-                      <input type="url" value={configForm.provider_url ?? ''} onChange={(e) => setConfigForm({ ...configForm, provider_url: e.target.value })} className="input" placeholder="https://seu-provedor.com" />
-                    </div>
-                    <div>
-                      <label className="label">Nome da instância</label>
-                      <input type="text" value={configForm.instance_name ?? ''} onChange={(e) => setConfigForm({ ...configForm, instance_name: e.target.value })} className="input" placeholder="minha-empresa" />
-                    </div>
-                    <div>
-                      <label className="label">API Key do provedor</label>
-                      <input type="password" value={configForm.api_key ?? ''} onChange={(e) => setConfigForm({ ...configForm, api_key: e.target.value })} className="input" placeholder="Chave do Evolution API" />
-                    </div>
-                    <div className="rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
-                      <p className="text-xs text-amber-800">
-                        <AlertTriangle size={14} className="inline mr-1" />
-                        APIs não oficiais podem causar bloqueio ou perda do número pela Meta. Use apenas um provedor autorizado por você.
-                      </p>
-                    </div>
-                    <div className="flex justify-end gap-3 pt-2">
-                      <button onClick={() => { setShowConfigModal(null); setConfigType(null); }} className="btn-secondary">Cancelar</button>
-                      <button
-                        onClick={handleSaveUnofficialWhatsApp}
-                        disabled={whatsappSaving || !configForm.provider_url || !configForm.instance_name || !configForm.api_key}
-                        className="btn-primary flex items-center gap-2"
-                      >
-                        {whatsappSaving ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
-                        {whatsappSaving ? 'Gerando QR...' : 'Gerar QR Code'}
-                      </button>
-                    </div>
-                  </>}
                 </>
               )}
             </>
