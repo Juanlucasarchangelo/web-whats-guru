@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { localFields } from './local-fields.js';
 import { prisma } from '../db.js';
+import { publicLocation } from '../services/evolution-media.js';
 import { HttpError, wrap } from '../http.js';
 import { conversationScope, requireConversation, requireAssigneeForChannel, admin } from '../services/channel-access.js';
 import { processTagAdded } from '../services/workflow-engine.js';
@@ -188,7 +189,8 @@ export function localDataRouter() {
     }
     const [data, count] = await Promise.all([prisma[model].findMany(options), prisma[model].count({where})]);
     // Only safe tables can reach here; no password or credential tables in MODELS.
-    const safeRows = table === 'integrations' ? data.map(({ config, ...rest }) => ({ ...rest, config: {} })) : data;
+    const safeRows = table === 'integrations' ? data.map(({ config, ...rest }) => ({ ...rest, config: {} }))
+      : table === 'messages' ? data.map(({ media_message, ...rest }) => ({ ...rest, media_location: rest.media_type === 'location' ? publicLocation(media_message) : null })) : data;
     res.json({ data: project(await withJoins(req, table, safeRows, select), select), count });
   }));
   router.post('/mutate', wrap(async (req, res) => {
