@@ -1,5 +1,3 @@
-// Mapeamento 1:1 das 24 tabelas do SQL da Etapa 2.
-// Banco JA criado no MySQL Workbench; NAO usar db push/migrate aqui.
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,161 +8,233 @@ datasource db {
 }
 
 model User {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  email                  String       @db.VarChar(254)
-  password_hash          String       @db.VarChar(255)
-  email_verified         Boolean      @default(false)
-  is_active              Boolean      @default(true)
-  last_login_at          DateTime?    @db.DateTime(3)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
-  @@unique([email], map: "uq_users_email")
+  id             String         @id @default(uuid()) @db.Char(36)
+  email          String         @unique(map: "uq_users_email") @db.VarChar(254)
+  password_hash  String         @db.VarChar(255)
+  email_verified Boolean        @default(false)
+  is_active      Boolean        @default(true)
+  last_login_at  DateTime?
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @default(now()) @updatedAt
+  attachments    Attachment[]
+  audit_logs     AuditLog[]
+  automations    Automation[]
+  campaigns      Campaign[]
+  chatbots       Chatbot[]
+  conversations  Conversation[]
+  internal_notes InternalNote[]
+  org_members    OrgMember[]
+  organizations  Organization[]
+  quick_replies  QuickReply[]
+  schedules      Schedule[]
+  team_members   TeamMember[]
+  user_profiles  UserProfile?
+
   @@map("users")
 }
 
 model Organization {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  name                   String       @db.Text
-  slug                   String       @db.VarChar(191)
-  owner_id               String       @db.Char(36)
-  plan                   String       @default("free") @db.VarChar(64)
-  status                 String       @default("active") @db.VarChar(64)
-  settings               Json         
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
-  @@unique([slug], map: "uq_organizations_slug")
+  id                      String                  @id @default(uuid()) @db.Char(36)
+  name                    String                  @db.Text
+  slug                    String                  @unique(map: "uq_organizations_slug")
+  owner_id                String                  @db.Char(36)
+  plan                    String                  @default("free") @db.VarChar(64)
+  status                  String                  @default("active") @db.VarChar(64)
+  settings                Json
+  created_at              DateTime                @default(now())
+  updated_at              DateTime                @default(now()) @updatedAt
+  attachments             Attachment[]
+  audit_logs              AuditLog[]
+  automations             Automation[]
+  campaigns               Campaign[]
+  chatbots                Chatbot[]
+  contacts                Contact[]
+  conversations           Conversation[]
+  integration_credentials IntegrationCredential[]
+  integrations            Integration[]
+  internal_notes          InternalNote[]
+  messages                Message[]
+  org_members             OrgMember[]
+  users                   User                    @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_organizations_owner")
+  quick_replies           QuickReply[]
+  schedules               Schedule[]
+  tags                    Tag[]
+  teams                   Team[]
+  webhook_events          WebhookEvent[]
+
   @@index([owner_id], map: "idx_organizations_owner_id")
   @@map("organizations")
 }
 
 model OrgMember {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  user_id                String       @db.Char(36)
-  role                   String       @default("agent") @db.VarChar(32)
-  status                 String       @default("active") @db.VarChar(32)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  user_id       String       @db.Char(36)
+  role          String       @default("agent") @db.VarChar(32)
+  status        String       @default("active") @db.VarChar(32)
+  created_at    DateTime     @default(now())
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_org_members_org")
+  users         User         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_org_members_user")
+
   @@unique([org_id, user_id], map: "uq_org_members_org_user")
   @@index([user_id], map: "idx_org_members_user")
   @@map("org_members")
 }
 
 model Team {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.Text
-  description            String?      @db.Text
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  name          String       @db.Text
+  description   String?      @db.Text
+  created_at    DateTime     @default(now())
+  team_members  TeamMember[]
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_teams_org")
+
   @@index([org_id], map: "idx_teams_org")
   @@map("teams")
 }
 
 model TeamMember {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  team_id                String       @db.Char(36)
-  user_id                String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id         String   @id @default(uuid()) @db.Char(36)
+  team_id    String   @db.Char(36)
+  user_id    String   @db.Char(36)
+  created_at DateTime @default(now())
+  teams      Team     @relation(fields: [team_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_team_members_team")
+  users      User     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_team_members_user")
+
   @@unique([team_id, user_id], map: "uq_team_members_team_user")
   @@index([user_id], map: "idx_team_members_user")
   @@map("team_members")
 }
 
 model Contact {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.Text
-  email                  String?      @db.Text
-  phone                  String?      @db.Text
-  avatar_url             String?      @db.Text
-  crm_stage              String       @default("lead") @db.VarChar(64)
-  crm_value              Decimal      @default(0) @db.Decimal(12, 2)
-  custom_fields          Json         
-  last_seen_at           DateTime?    @db.DateTime(3)
-  is_demo                Boolean      @default(false)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id                  String              @id @default(uuid()) @db.Char(36)
+  org_id              String              @db.Char(36)
+  name                String              @db.Text
+  email               String?             @db.Text
+  phone               String?             @db.Text
+  avatar_url          String?             @db.Text
+  crm_stage           String              @default("lead") @db.VarChar(64)
+  crm_value           Decimal?            @default(0.00) @db.Decimal(12, 2)
+  custom_fields       Json
+  last_seen_at        DateTime?
+  is_demo             Boolean             @default(false)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @default(now()) @updatedAt
+  campaign_recipients CampaignRecipient[]
+  contact_tags        ContactTag[]
+  organizations       Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_contacts_org")
+  conversations       Conversation[]
+  schedules           Schedule[]
+
   @@index([org_id], map: "idx_contacts_org_id")
   @@index([org_id, crm_stage], map: "idx_contacts_crm_stage")
   @@map("contacts")
 }
 
 model Tag {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.VarChar(191)
-  color                  String       @default("#3b82f6") @db.VarChar(32)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id                String            @id @default(uuid()) @db.Char(36)
+  org_id            String            @db.Char(36)
+  name              String
+  color             String            @default("#3b82f6") @db.VarChar(32)
+  created_at        DateTime          @default(now())
+  contact_tags      ContactTag[]
+  conversation_tags ConversationTag[]
+  organizations     Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_tags_org")
+
   @@unique([org_id, name], map: "uq_tags_org_name")
   @@map("tags")
 }
 
 model ContactTag {
-  contact_id             String       @db.Char(36)
-  tag_id                 String       @db.Char(36)
+  contact_id String  @db.Char(36)
+  tag_id     String  @db.Char(36)
+  contacts   Contact @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_contact_tags_contact")
+  tags       Tag     @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_contact_tags_tag")
+
   @@id([contact_id, tag_id])
   @@index([tag_id], map: "idx_contact_tags_tag")
   @@map("contact_tags")
 }
 
 model Conversation {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  contact_id             String       @db.Char(36)
-  channel                String       @default("whatsapp") @db.VarChar(64)
-  integration_id         String?      @db.Char(36)
-  status                 String       @default("open") @db.VarChar(32)
-  assigned_to            String?      @db.Char(36)
-  subject                String?      @db.Text
-  unread_count           Int          @default(0)
-  last_message_at        DateTime     @default(now()) @db.DateTime(3)
-  is_demo                Boolean      @default(false)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id                String            @id @default(uuid()) @db.Char(36)
+  org_id            String            @db.Char(36)
+  contact_id        String            @db.Char(36)
+  channel           String            @default("whatsapp") @db.VarChar(64)
+  integration_id    String?           @db.Char(36)
+  status            String            @default("open") @db.VarChar(32)
+  assigned_to       String?           @db.Char(36)
+  subject           String?           @db.Text
+  unread_count      Int               @default(0)
+  last_message_at   DateTime          @default(now())
+  is_demo           Boolean           @default(false)
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @default(now()) @updatedAt
+  conversation_tags ConversationTag[]
+  users             User?             @relation(fields: [assigned_to], references: [id], onUpdate: NoAction, map: "fk_conversations_agent")
+  contacts          Contact           @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_conversations_contact")
+  organizations     Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_conversations_org")
+  internal_notes    InternalNote[]
+  messages          Message[]
+
   @@index([org_id], map: "idx_conversations_org_id")
   @@index([contact_id], map: "idx_conversations_contact")
   @@index([org_id, integration_id], map: "idx_conversations_integration")
   @@index([org_id, status], map: "idx_conversations_status")
   @@index([org_id, assigned_to], map: "idx_conversations_assigned")
+  @@index([assigned_to], map: "fk_conversations_agent")
   @@map("conversations")
 }
 
 model ConversationTag {
-  conversation_id        String       @db.Char(36)
-  tag_id                 String       @db.Char(36)
+  conversation_id String       @db.Char(36)
+  tag_id          String       @db.Char(36)
+  conversations   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_conversation_tags_conversation")
+  tags            Tag          @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_conversation_tags_tag")
+
   @@id([conversation_id, tag_id])
   @@index([tag_id], map: "idx_conversation_tags_tag")
   @@map("conversation_tags")
 }
 
 model Message {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  conversation_id        String       @db.Char(36)
-  org_id                 String       @db.Char(36)
-  sender_type            String       @default("contact") @db.VarChar(32)
-  sender_id              String?      @db.Char(36)
-  body                   String       @db.LongText
-  channel                String       @default("whatsapp") @db.VarChar(64)
-  status                 String       @default("sent") @db.VarChar(32)
-  is_internal            Boolean      @default(false)
-  is_bot                 Boolean      @default(false)
-  media_type             String?      @db.VarChar(32)
-  media_mime             String?      @db.VarChar(191)
-  media_name             String?      @db.VarChar(255)
-  media_size             Int?
-  media_message          Json?
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id              String       @id @default(uuid()) @db.Char(36)
+  conversation_id String       @db.Char(36)
+  org_id          String       @db.Char(36)
+  sender_type     String       @default("contact") @db.VarChar(32)
+  sender_id       String?      @db.Char(36)
+  body            String       @db.LongText
+  channel         String       @default("whatsapp") @db.VarChar(64)
+  status          String       @default("sent") @db.VarChar(32)
+  is_internal     Boolean      @default(false)
+  is_bot          Boolean      @default(false)
+  created_at      DateTime     @default(now())
+  media_message   Json?
+  media_mime      String?
+  media_name      String?      @db.VarChar(255)
+  media_size      Int?
+  media_type      String?      @db.VarChar(32)
+  attachments     Attachment[]
+  conversations   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_messages_conversation")
+  organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_messages_org")
+
   @@index([conversation_id], map: "idx_messages_conversation_id")
   @@index([org_id], map: "idx_messages_org_id")
   @@map("messages")
 }
 
 model InternalNote {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  conversation_id        String       @db.Char(36)
-  org_id                 String       @db.Char(36)
-  author_id              String       @db.Char(36)
-  body                   String       @db.LongText
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id              String       @id @default(uuid()) @db.Char(36)
+  conversation_id String       @db.Char(36)
+  org_id          String       @db.Char(36)
+  author_id       String       @db.Char(36)
+  body            String       @db.LongText
+  created_at      DateTime     @default(now())
+  users           User         @relation(fields: [author_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_author")
+  conversations   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_conversation")
+  organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_org")
+
   @@index([conversation_id], map: "idx_notes_conversation_id")
   @@index([org_id], map: "idx_notes_org")
   @@index([author_id], map: "idx_notes_author")
@@ -172,28 +242,35 @@ model InternalNote {
 }
 
 model QuickReply {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  shortcut               String       @db.VarChar(191)
-  title                  String       @db.Text
-  body                   String       @db.LongText
-  created_by             String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  shortcut      String
+  title         String       @db.Text
+  body          String       @db.LongText
+  created_by    String       @db.Char(36)
+  created_at    DateTime     @default(now())
+  users         User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_quick_replies_creator")
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_quick_replies_org")
+
   @@index([org_id], map: "idx_quick_replies_org")
   @@index([created_by], map: "idx_quick_replies_creator")
   @@map("quick_replies")
 }
 
 model Attachment {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  message_id             String?      @db.Char(36)
-  file_name              String       @db.Text
-  file_url               String       @db.Text
-  file_type              String?      @db.Text
-  file_size              Int?         
-  uploaded_by            String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  message_id    String?      @db.Char(36)
+  file_name     String       @db.Text
+  file_url      String       @db.Text
+  file_type     String?      @db.Text
+  file_size     Int?
+  uploaded_by   String       @db.Char(36)
+  created_at    DateTime     @default(now())
+  messages      Message?     @relation(fields: [message_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_message")
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_org")
+  users         User         @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_user")
+
   @@index([org_id], map: "idx_attachments_org")
   @@index([message_id], map: "idx_attachments_message")
   @@index([uploaded_by], map: "idx_attachments_user")
@@ -201,91 +278,108 @@ model Attachment {
 }
 
 model Chatbot {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.Text
-  description            String?      @db.Text
-  flow                   Json         
-  status                 String       @default("draft") @db.VarChar(32)
-  trigger_channel        String?      @db.Text
-  trigger_keyword        String?      @db.Text
-  created_by             String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id              String       @id @default(uuid()) @db.Char(36)
+  org_id          String       @db.Char(36)
+  name            String       @db.Text
+  description     String?      @db.Text
+  flow            Json
+  status          String       @default("draft") @db.VarChar(32)
+  trigger_channel String?      @db.Text
+  trigger_keyword String?      @db.Text
+  created_by      String       @db.Char(36)
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @default(now()) @updatedAt
+  users           User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_chatbots_creator")
+  organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_chatbots_org")
+
   @@index([org_id], map: "idx_chatbots_org")
   @@index([created_by], map: "idx_chatbots_creator")
   @@map("chatbots")
 }
 
 model Automation {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.Text
-  description            String?      @db.Text
-  trigger                Json         
-  actions                Json         
-  status                 String       @default("active") @db.VarChar(32)
-  created_by             String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  name          String       @db.Text
+  description   String?      @db.Text
+  trigger       Json
+  actions       Json
+  status        String       @default("active") @db.VarChar(32)
+  created_by    String       @db.Char(36)
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
+  users         User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_creator")
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_org")
+
   @@index([org_id], map: "idx_automations_org")
   @@index([created_by], map: "idx_automations_creator")
   @@map("automations")
 }
 
 model Campaign {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  name                   String       @db.Text
-  message                String       @db.LongText
-  channel                String       @default("whatsapp") @db.VarChar(64)
-  segment_tags           Json         
-  integration_id         String?      @db.Char(36)
-  segment_stage          String?      @db.Text
-  scheduled_at           DateTime?    @db.DateTime(3)
-  status                 String       @default("draft") @db.VarChar(32)
-  consent_required       Boolean      @default(true)
-  daily_limit            Int          @default(100)
-  sent_count             Int          @default(0)
-  delivered_count        Int          @default(0)
-  read_count             Int          @default(0)
-  failed_count           Int          @default(0)
-  created_by             String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id                  String              @id @default(uuid()) @db.Char(36)
+  org_id              String              @db.Char(36)
+  name                String              @db.Text
+  message             String              @db.LongText
+  channel             String              @default("whatsapp") @db.VarChar(64)
+  segment_tags        Json
+  segment_stage       String?             @db.Text
+  scheduled_at        DateTime?
+  status              String              @default("draft") @db.VarChar(32)
+  consent_required    Boolean             @default(true)
+  daily_limit         Int                 @default(100)
+  sent_count          Int                 @default(0)
+  delivered_count     Int                 @default(0)
+  read_count          Int                 @default(0)
+  failed_count        Int                 @default(0)
+  created_by          String              @db.Char(36)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @default(now()) @updatedAt
+  integration_id      String?             @db.Char(36)
+  campaign_recipients CampaignRecipient[]
+  users               User                @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaigns_creator")
+  organizations       Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaigns_org")
+
   @@index([org_id], map: "idx_campaigns_org")
   @@index([created_by], map: "idx_campaigns_creator")
   @@map("campaigns")
 }
 
 model CampaignRecipient {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  campaign_id            String       @db.Char(36)
-  contact_id             String       @db.Char(36)
-  status                 String       @default("pending") @db.VarChar(32)
-  sent_at                DateTime?    @db.DateTime(3)
-  delivered_at           DateTime?    @db.DateTime(3)
-  read_at                DateTime?    @db.DateTime(3)
-  error                  String?      @db.LongText
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id           String    @id @default(uuid()) @db.Char(36)
+  campaign_id  String    @db.Char(36)
+  contact_id   String    @db.Char(36)
+  status       String    @default("pending") @db.VarChar(32)
+  sent_at      DateTime?
+  delivered_at DateTime?
+  read_at      DateTime?
+  error        String?   @db.LongText
+  created_at   DateTime  @default(now())
+  campaigns    Campaign  @relation(fields: [campaign_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaign_recipients_campaign")
+  contacts     Contact   @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaign_recipients_contact")
+
   @@index([campaign_id], map: "idx_campaign_recipients_campaign_id")
   @@index([contact_id], map: "idx_campaign_recipients_contact")
   @@map("campaign_recipients")
 }
 
 model Schedule {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  contact_id             String?      @db.Char(36)
-  title                  String       @db.Text
-  message                String?      @db.LongText
-  scheduled_at           DateTime     @db.DateTime(3)
-  integration_id         String?      @db.Char(36)
-  delivery_enabled       Boolean      @default(false)
-  channel                String       @default("whatsapp") @db.VarChar(64)
-  status                 String       @default("pending") @db.VarChar(32)
-  created_by             String       @db.Char(36)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id               String       @id @default(uuid()) @db.Char(36)
+  org_id           String       @db.Char(36)
+  contact_id       String?      @db.Char(36)
+  title            String       @db.Text
+  message          String?      @db.LongText
+  scheduled_at     DateTime
+  channel          String       @default("whatsapp") @db.VarChar(64)
+  status           String       @default("pending") @db.VarChar(32)
+  created_by       String       @db.Char(36)
+  created_at       DateTime     @default(now())
+  integration_id   String?      @db.Char(36)
+  delivery_enabled Boolean      @default(false)
+  contacts         Contact?     @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_contact")
+  users            User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_creator")
+  organizations    Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_org")
+
   @@index([org_id], map: "idx_schedules_org_id")
   @@index([org_id, status], map: "idx_schedules_status")
   @@index([contact_id], map: "idx_schedules_contact")
@@ -294,14 +388,17 @@ model Schedule {
 }
 
 model AuditLog {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  user_id                String?      @db.Char(36)
-  action                 String       @db.Text
-  entity_type            String?      @db.Text
-  entity_id              String?      @db.Char(36)
-  details                Json         
-  created_at             DateTime     @default(now()) @db.DateTime(3)
+  id            String       @id @default(uuid()) @db.Char(36)
+  org_id        String       @db.Char(36)
+  user_id       String?      @db.Char(36)
+  action        String       @db.Text
+  entity_type   String?      @db.Text
+  entity_id     String?      @db.Char(36)
+  details       Json
+  created_at    DateTime     @default(now())
+  organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_audit_logs_org")
+  users         User?        @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "fk_audit_logs_user")
+
   @@index([org_id], map: "idx_audit_logs_org_id")
   @@index([org_id, created_at], map: "idx_audit_logs_created_at")
   @@index([user_id], map: "idx_audit_logs_user")
@@ -309,55 +406,63 @@ model AuditLog {
 }
 
 model Integration {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  type                   String       @db.VarChar(64)
-  name                   String       @db.Text
-  config                 Json         
-  status                 String       @default("disconnected") @db.VarChar(32)
-  last_connected_at      DateTime?    @db.DateTime(3)
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  id                      String                 @id @default(uuid()) @db.Char(36)
+  org_id                  String                 @db.Char(36)
+  type                    String                 @db.VarChar(64)
+  name                    String                 @db.Text
+  config                  Json
+  status                  String                 @default("disconnected") @db.VarChar(32)
+  last_connected_at       DateTime?
+  created_at              DateTime               @default(now())
+  updated_at              DateTime               @default(now()) @updatedAt
+  integration_credentials IntegrationCredential?
+  organizations           Organization           @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_integrations_org")
+
   @@index([org_id, type], map: "idx_integrations_org_type")
   @@map("integrations")
 }
 
 model WebhookEvent {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  org_id                 String?      @db.Char(36)
-  source                 String       @db.Text
-  event_type             String?      @db.Text
-  payload                Json         
-  processed              Boolean      @default(false)
-  processed_at           DateTime?    @db.DateTime(3)
-  error                  String?      @db.LongText
-  received_at            DateTime     @default(now()) @db.DateTime(3)
+  id            String        @id @default(uuid()) @db.Char(36)
+  org_id        String?       @db.Char(36)
+  source        String        @db.Text
+  event_type    String?       @db.Text
+  payload       Json
+  processed     Boolean       @default(false)
+  processed_at  DateTime?
+  error         String?       @db.LongText
+  received_at   DateTime      @default(now())
+  organizations Organization? @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_webhook_events_org")
+
   @@index([org_id], map: "idx_webhook_events_org_id")
   @@index([processed], map: "idx_webhook_events_processed")
   @@map("webhook_events")
 }
 
 model UserProfile {
-  id                     String       @default(uuid()) @db.Char(36) @id
-  user_id                String       @db.Char(36)
-  full_name              String       @db.Text
-  avatar_url             String?      @db.Text
-  phone                  String?      @db.Text
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
-  @@unique([user_id], map: "uq_user_profiles_user")
+  id         String   @id @default(uuid()) @db.Char(36)
+  user_id    String   @unique(map: "uq_user_profiles_user") @db.Char(36)
+  full_name  String   @db.Text
+  avatar_url String?  @db.Text
+  phone      String?  @db.Text
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+  users      User     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_profiles_user")
+
   @@map("user_profiles")
 }
 
 model IntegrationCredential {
-  integration_id         String       @db.Char(36) @id
-  org_id                 String       @db.Char(36)
-  access_token           String       @db.Text
-  verify_token           String       @db.Text
-  app_secret             String?      @db.Text
-  created_at             DateTime     @default(now()) @db.DateTime(3)
-  updated_at             DateTime     @default(now()) @updatedAt @db.DateTime(3)
+  integration_id String       @id @db.Char(36)
+  org_id         String       @db.Char(36)
+  access_token   String       @db.Text
+  verify_token   String       @db.Text
+  app_secret     String?      @db.Text
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @default(now()) @updatedAt
+  integrations   Integration  @relation(fields: [integration_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_integration_credentials_integration")
+  organizations  Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_integration_credentials_org")
+
   @@index([org_id], map: "idx_integration_credentials_org_id")
   @@map("integration_credentials")
 }
-
