@@ -55,3 +55,15 @@ export interface AuthMeResponse {
   } | null;
   organizations: Array<{ id: string; name: string; slug: string; plan: string; status: string; role: 'owner' | 'admin' | 'agent' }>;
 }
+
+// Download autenticado de midias; nao exponha o token em URL de <img> ou <video>.
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const org = getSelectedOrg();
+  if (org) headers.set('x-org-id', org);
+  const response = await fetch(`${API_BASE}/api${path}`, { headers });
+  if (!response.ok) throw new ApiError(response.status, `Midia indisponivel (HTTP ${response.status}).`);
+  return response.blob();
+}

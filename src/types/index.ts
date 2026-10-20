@@ -97,6 +97,11 @@ export interface Message {
   status: string;
   is_internal: boolean;
   is_bot: boolean;
+  media_type?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | null;
+  media_mime?: string | null;
+  media_name?: string | null;
+  media_size?: number | null;
+  media_location?: { latitude: number; longitude: number; name: string; address: string; live: boolean } | null;
   created_at: string;
 }
 

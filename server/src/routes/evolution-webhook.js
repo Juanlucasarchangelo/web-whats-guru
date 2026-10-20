@@ -39,6 +39,21 @@ export function evolutionWebhookRouter() {
           results.push(await importEvolutionMessage({ orgId: integration.org_id, integrationId: integration.id, item, envelope: payload, triggerAutomations: true }));
         }
         counts = summarizeEvolutionResults(results);
+        // Diagnostico sem dados pessoais: nao registra numero, texto, chave nem URL de midia.
+        const ignored = results.map((result, index) => ({ result, item: evolutionEventItems(payload)[index] }))
+          .filter(({ result }) => ['ignored_non_private', 'ignored_phone_unresolved', 'ignored_unsupported_type'].includes(result.outcome));
+        for (const { result, item } of ignored.slice(0, 5)) {
+          const key = item?.key ?? item?.data?.key ?? {};
+          const jid = String(key.remoteJid ?? '');
+          const msg = item?.message ?? item?.data?.message ?? {};
+          console.info('[Evolution Diagnostico]', {
+            motivo: result.outcome,
+            jid_tipo: jid.includes('@') ? jid.split('@').pop() : 'ausente',
+            fromMe: Boolean(key.fromMe),
+            tipos: Object.keys(msg).slice(0, 8),
+            remoteJidAlt_presente: Boolean(key.remoteJidAlt),
+          });
+        }
         if (results.length === 0) counts.empty_payload = 1;
       } else if (event === 'connection.update') {
         const state = String(payload?.data?.state ?? payload?.data?.instance?.state ?? '');

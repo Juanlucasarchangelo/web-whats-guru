@@ -3,6 +3,7 @@ import { useOrg } from '@/contexts/OrgContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
+import { MessageMedia } from '@/components/inbox/MessageMedia';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
@@ -671,7 +672,10 @@ export function InboxPage() {
                           <Bot size={12} /> Bot
                         </div>
                       )}
-                      <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                      <MessageMedia message={msg} />
+                      {msg.body && !(msg.media_type && /^\[(Imagem|Vídeo|Áudio|Documento|Figurinha|Localização)\]$/.test(msg.body)) && (
+                        <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                      )}
                       <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? (msg.is_bot ? 'text-purple-500' : 'text-blue-200') : 'text-slate-400'}`}>
                         {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         {isAgent && !msg.is_bot && (
