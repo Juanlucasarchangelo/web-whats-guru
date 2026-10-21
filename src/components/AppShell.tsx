@@ -94,12 +94,12 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
               <span className="text-sm font-semibold">{currentOrg?.name?.charAt(0) ?? 'C'}</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-slate-900 truncate">{currentOrg?.name ?? 'Converso'}</p>
+              <p className="text-sm font-medium text-slate-900 truncate">{currentOrg?.name ?? 'Fala Comigo'}</p>
               <p className="text-xs text-slate-400 capitalize">{currentMembership?.role ?? 'equipe'}</p>
             </div>
           </div>
-          {organizations.length > 1 && <select className="input w-full text-sm mt-2" aria-label="Empresa ativa" value={currentOrg?.id || ''} onChange={e=>switchOrganization(e.target.value)}>
-            {organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+          {organizations.length > 1 && <select className="input w-full text-sm mt-2" aria-label="Empresa ativa" value={currentOrg?.id || ''} onChange={e => switchOrganization(e.target.value)}>
+            {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>}
         </div>
 
@@ -144,7 +144,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           {userMenuOpen && (
             <div className="absolute left-3 right-3 bottom-full mb-1 rounded-lg bg-white shadow-lg ring-1 ring-slate-200 py-1 z-10">
               <button
-                onClick={() => {setUserMenuOpen(false);handleNavigate('profile');}}
+                onClick={() => { setUserMenuOpen(false); handleNavigate('profile'); }}
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
               ><UserRound size={16} />Meu perfil</button>
               <button
@@ -179,7 +179,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600">
               <MessageCircle className="text-brand-on-accent" size={16} />
             </div>
-            <span className="font-bold text-slate-900">Converso</span>
+            <span className="font-bold text-slate-900">Fala Comigo</span>
           </div>
           <div className="w-8" />
         </header>

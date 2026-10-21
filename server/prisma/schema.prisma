@@ -137,6 +137,7 @@ model Tag {
   org_id            String            @db.Char(36)
   name              String
   color             String            @default("#3b82f6") @db.VarChar(32)
+  sort_order        Int?
   created_at        DateTime          @default(now())
   contact_tags      ContactTag[]
   conversation_tags ConversationTag[]

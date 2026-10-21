@@ -301,6 +301,10 @@ export function conversationsRouter() {
     );
 
     const where = await conversationScope(req);
+    // Filtro por contato para abrir conversas do CRM sem limitar aos últimos 100 chats.
+    if (req.query.contact_id != null) {
+      where.contact_id = idParam.parse(String(req.query.contact_id));
+    }
 
     const data = await prisma.conversation.findMany({
       where,

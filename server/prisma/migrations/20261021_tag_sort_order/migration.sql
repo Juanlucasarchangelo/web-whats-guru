@@ -1,0 +1,1 @@
+ALTER TABLE `tags` ADD COLUMN `sort_order` INTEGER NULL;
