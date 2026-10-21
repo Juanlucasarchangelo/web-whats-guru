@@ -71,6 +71,10 @@ export const localFields = {
       "type": "String",
       "isRequired": true
     },
+    "sort_order": {
+      "type": "Int",
+      "isRequired": false
+    },
     "created_at": {
       "type": "DateTime",
       "isRequired": true

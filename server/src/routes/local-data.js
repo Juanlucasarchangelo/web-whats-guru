@@ -13,7 +13,7 @@ import { processTagAdded } from '../services/workflow-engine.js';
 
 const MODELS = {
   contacts: ['contact', 'name email phone avatar_url crm_stage crm_value custom_fields last_seen_at'],
-  tags: ['tag', 'name color'],
+  tags: ['tag', 'name color sort_order'],
   contact_tags: ['contactTag', 'contact_id tag_id'],
   conversations: ['conversation', 'contact_id channel status assigned_to subject unread_count last_message_at'],
   conversation_tags: ['conversationTag', 'conversation_id tag_id'],

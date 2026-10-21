@@ -44,7 +44,7 @@ export function AuthPage() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30 mb-4">
             <MessageCircle className="text-brand-on-accent" size={28} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Converso</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Fala Comigo</h1>
           <p className="text-sm text-slate-400 mt-1">Atendimento multicanal, CRM e automação</p>
         </div>
 
