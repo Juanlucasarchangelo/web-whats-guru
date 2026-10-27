@@ -17,6 +17,8 @@ import { TeamPage } from '@/pages/TeamPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { useState } from 'react';
+import { TechnicalReportPage } from '@/pages/TechnicalReportPage';
+import { OrderOfDayPage } from '@/pages/OrderOfDayPage';
 
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
@@ -38,6 +40,8 @@ function AppContent() {
         campaigns: <CampaignsPage />,
         schedules: <SchedulesPage />,
         reports: <ReportsPage />,
+        technicalOdd: <OrderOfDayPage embedded />,
+        technicalReport: <TechnicalReportPage embedded />,
         team: <TeamPage />,
         settings: <SettingsPage />,
         profile: <ProfilePage />,
@@ -47,6 +51,14 @@ function AppContent() {
 }
 
 export default function App() {
+  // Página pública independente dos providers de autenticação e organização.
+  const path=window.location.pathname.replace(/\/$/, '');
+  if (path === '/ordem-do-dia' || path === '/odd') {
+    return <OrderOfDayPage />;
+  }
+  if (path === '/relatorio-tecnico') {
+    return <TechnicalReportPage />;
+  }
   return (
     <AuthProvider>
       <OrgProvider>
