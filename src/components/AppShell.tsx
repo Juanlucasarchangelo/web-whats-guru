@@ -4,13 +4,13 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, Shield, UserRound, Moon, Sun,
+  LogOut, Menu, X, Shield, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
 } from 'lucide-react';
 
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
   | 'automations' | 'campaigns' | 'schedules' | 'reports'
-  | 'team' | 'settings' | 'profile';
+  | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport';
 
 interface AppShellProps {
   currentPage: PageId;
@@ -37,6 +37,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
   const { currentOrg, currentMembership, organizations, switchOrganization } = useOrg();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [areaTecnicaOpen,setAreaTecnicaOpen] = useState(false);
   // Preferência local da interface: tema escuro por padrão.
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
@@ -122,6 +123,29 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
               </button>
             );
           })}
+          {/* Subseção independente: ambas as telas também estão disponíveis publicamente por URL. */}
+          <button
+            type="button"
+            onClick={() => setAreaTecnicaOpen(open => !open)}
+            aria-expanded={areaTecnicaOpen}
+            className={`sidebar-item w-full ${(currentPage === 'technicalOdd' || currentPage === 'technicalReport') ? 'sidebar-item-active' : ''}`}
+          >
+            <Wrench size={18}/>
+            <span className="flex-1 text-left">Área técnica</span>
+            <ChevronDown size={16} className={`transition-transform ${areaTecnicaOpen ? 'rotate-180' : ''}`}/>
+          </button>
+          {areaTecnicaOpen && (
+            <div className="ml-5 border-l border-slate-200 pl-2 space-y-0.5">
+              <button type="button" onClick={() => handleNavigate('technicalOdd')}
+                className={`sidebar-item w-full ${currentPage === 'technicalOdd'?'sidebar-item-active':''}`}>
+                <ClipboardList size={16}/><span className="flex-1 text-left">ODD</span>
+              </button>
+              <button type="button" onClick={() => handleNavigate('technicalReport')}
+                className={`sidebar-item w-full ${currentPage === 'technicalReport'?'sidebar-item-active':''}`}>
+                <FileText size={16}/><span className="flex-1 text-left">Relatório técnico</span>
+              </button>
+            </div>
+          )}
         </nav>
 
         {/* User section */}
