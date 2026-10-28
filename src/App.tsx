@@ -62,7 +62,28 @@ function AppContent() {
   );
 }
 
+/**
+ * Acesso público temporário SOMENTE aos formulários técnicos que geram PDF
+ * no próprio navegador. As páginas internas continuam protegidas pelo RBAC.
+ * Não torna públicas APIs, relatórios salvos ou outros módulos.
+ */
+function PublicTechnicalPage() {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/odd' || path === '/ordem-do-dia') {
+    return <OrderOfDayPage />;
+  }
+  if (path === '/relatorio-tecnico') {
+    return <TechnicalReportPage />;
+  }
+  return null;
+}
+
 export default function App() {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/odd' || path === '/ordem-do-dia' || path === '/relatorio-tecnico') {
+    return <PublicTechnicalPage />;
+  }
+
   return (
     <AuthProvider>
       <OrgProvider>
