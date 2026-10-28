@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { can } from '../services/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -8,7 +9,7 @@ import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus
 import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
 import { visibleChannelIds, admin } from '../services/channel-access.js';
 const id=z.string().uuid();
-const checkAdmin=req=>{if(!admin(req))throw new HttpError(403,'Somente administradores podem configurar numeros.');};
+const checkAdmin=req=>{if(!can(req,'settings.manage'))throw new HttpError(403,'Somente administradores podem configurar numeros.');};
 function safe(row){return {id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
 function webhookEndpoint(){
  const root=process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim().replace(/\/$/,'');

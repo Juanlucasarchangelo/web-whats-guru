@@ -3,6 +3,7 @@
  * Not an unrestricted SQL/Prisma proxy: every table and write field is listed below.
  */
 import { Router } from 'express';
+import { can, isMaster } from '../services/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { localFields } from './local-fields.js';
 import { prisma } from '../db.js';
@@ -43,7 +44,7 @@ const allowed = (table) => {
   return { model: MODELS[table][0], writable: new Set(MODELS[table][1].split(' ').filter(Boolean)) };
 };
 const admins = (req) => {
-  if (!['owner', 'admin'].includes(req.role)) throw new HttpError(403, 'Somente administradores podem fazer esta operacao.');
+  if (!can(req,'team.teams.manage')) throw new HttpError(403, 'Somente administradores podem fazer esta operacao.');
 };
 function safeFilters(table, items) {
   if (!Array.isArray(items) || items.length > 15) throw new HttpError(400, 'Filtros invalidos.');
@@ -259,8 +260,8 @@ export function localDataRouter() {
       if (!found.length) return [];
       if (found.length >= 100) throw new HttpError(400, 'Operacao em massa nao autorizada.');
       if (table === 'org_members') {
-        if (req.role !== 'owner') throw new HttpError(403, 'Somente o proprietario gerencia perfis.');
-        if (found.some(r => r.role === 'owner')) throw new HttpError(403, 'Proprietario nao pode ser removido ou rebaixado.');
+        if (!isMaster(req)) throw new HttpError(403, 'Somente o proprietario gerencia perfis.');
+        if (found.some(r => r.role === 'master')) throw new HttpError(403, 'Proprietario nao pode ser removido ou rebaixado.');
       }
       if (table === 'user_profiles' && found.some(r => r.user_id !== req.user.id)) throw new HttpError(403, 'So e permitido editar o proprio perfil.');
       if (action === 'delete') {

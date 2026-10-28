@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { can } from '../services/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -9,7 +10,7 @@ import { visibleChannelIds } from '../services/channel-access.js';
 const uuid=z.string().uuid();
 const campaignCreate=z.object({name:z.string().trim().min(2).max(150),message:z.string().trim().min(1).max(2000),integration_id:uuid,segment_stage:z.enum(['lead','qualified','negotiation','won','lost']).nullable().optional(),segment_tags:z.array(uuid).max(20).default([]),daily_limit:z.number().int().min(1).max(30).default(15),scheduled_at:z.string().datetime().nullable().optional()}).strict();
 const scheduleCreate=z.object({title:z.string().trim().min(2).max(150),contact_id:uuid.nullable().optional(),integration_id:uuid.nullable().optional(),message:z.string().trim().max(3000).nullable().optional(),scheduled_at:z.string().datetime(),send_whatsapp:z.boolean().default(false)}).strict();
-function mustAdmin(req){if(!['owner','admin'].includes(req.role))throw new HttpError(403,'Somente administradores podem gerenciar campanhas.');}
+function mustAdmin(req){if(!can(req,'campaigns.manage'))throw new HttpError(403,'Somente administradores podem gerenciar campanhas.');}
 async function authorizedChannel(req,id) {
   if(!(await visibleChannelIds(req)).includes(id))throw new HttpError(403,'Numero sem permissao.');
   try{return await ensureChannel(req.orgId,id);}catch(err){throw new HttpError(400,err.message);}
@@ -104,7 +105,7 @@ export function operationsRouter(){
   res.json({saved:true});
  }));
  router.get('/schedules',wrap(async(req,res)=>{
-  const list=await prisma.schedule.findMany({where:{org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id})},orderBy:{scheduled_at:'asc'},take:250});
+  const list=await prisma.schedule.findMany({where:{org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id})},orderBy:{scheduled_at:'asc'},take:250});
   const contacts=await prisma.contact.findMany({where:{org_id:req.orgId,id:{in:list.map(x=>x.contact_id).filter(Boolean)}},select:{id:true,name:true}});
   const by=new Map(contacts.map(c=>[c.id,c]));
   res.json({data:list.map(r=>({...r,contact:by.get(r.contact_id)||null}))});
@@ -125,7 +126,7 @@ export function operationsRouter(){
  }));
  router.patch('/schedules/:id',wrap(async(req,res)=>{
   const id=uuid.parse(req.params.id);const v=scheduleCreate.parse(req.body);
-  const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id})}});
+  const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id})}});
   if(!row)throw new HttpError(404,'Agendamento nao encontrado.');
   if(row.status!=='pending')throw new HttpError(409,'Somente pendentes podem ser editados.');
   const date=new Date(v.scheduled_at);
@@ -137,33 +138,33 @@ export function operationsRouter(){
  }));
  router.post('/schedules/:id/send-now',wrap(async(req,res)=>{
   const id=uuid.parse(req.params.id);
-  const where={id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id}),status:'pending',delivery_enabled:true};
+  const where={id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id}),status:'pending',delivery_enabled:true};
   const result=await prisma.schedule.updateMany({where,data:{scheduled_at:new Date()}});
   if(!result.count)throw new HttpError(409,'Somente agendamentos de envio WhatsApp pendentes podem ser executados agora.');
   res.json({queued:true,note:'Execucao na proxima rodada, em ate 30 segundos.'});
  }));
  router.post('/schedules/:id/complete',wrap(async(req,res)=>{
   const id=uuid.parse(req.params.id);
-  const where={id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id}),status:'pending',delivery_enabled:false};
+  const where={id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id}),status:'pending',delivery_enabled:false};
   const result=await prisma.schedule.updateMany({where,data:{status:'done'}});
   if(!result.count)throw new HttpError(409,'Apenas lembretes internos pendentes podem ser concluidos.');
   res.json({done:true});
  }));
  router.post('/schedules/:id/cancel',wrap(async(req,res)=>{
   const id=uuid.parse(req.params.id);
-  const where={id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id}),status:'pending'};
+  const where={id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id}),status:'pending'};
   const claim=await prisma.schedule.updateMany({where,data:{status:'cancelled'}});
   if(!claim.count)throw new HttpError(409,'Agendamento nao pode mais ser cancelado (ja executado ou em processamento).');
   res.json({cancelled:true});
  }));
  router.delete('/schedules/:id',wrap(async(req,res)=>{
-  const id=uuid.parse(req.params.id);const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id})}});
+  const id=uuid.parse(req.params.id);const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id})}});
   if(!row)throw new HttpError(404,'Agendamento nao encontrado.');
   if(!['cancelled','sent','failed','done'].includes(row.status))throw new HttpError(409,'Cancele antes de excluir.');
   await prisma.schedule.delete({where:{id}});res.json({deleted:true});
  }));
  router.get('/schedules/:id/log',wrap(async(req,res)=>{
-  const id=uuid.parse(req.params.id);const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(['owner','admin'].includes(req.role)?{}:{created_by:req.user.id})}});
+  const id=uuid.parse(req.params.id);const row=await prisma.schedule.findFirst({where:{id,org_id:req.orgId,...(can(req,'team.teams.manage')?{}:{created_by:req.user.id})}});
   if(!row)throw new HttpError(404,'Agendamento nao encontrado.');
   res.json({data:await prisma.auditLog.findMany({where:{org_id:req.orgId,entity_type:'schedule',entity_id:id},orderBy:{created_at:'desc'},take:10})});
  }));

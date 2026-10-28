@@ -42,7 +42,7 @@ const INTEGRATION_TYPES = [
 ];
 
 export function SettingsPage() {
-  const { currentOrg,currentMembership } = useOrg();
+  const { currentOrg,currentMembership , can} = useOrg();
   const orgId = currentOrg?.id;
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -259,7 +259,7 @@ export function SettingsPage() {
 
       {activeTab === 'integrations' && (
         <div className="space-y-4">
-          <ChannelsPanel canManage={currentMembership?.role==='owner'||currentMembership?.role==='admin'} />
+          <ChannelsPanel canManage={can('settings.manage')} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));

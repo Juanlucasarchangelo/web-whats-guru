@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
+import { normalizeRole } from '../services/permissions.js';
 
 export const authenticate = (config) => wrap(async (req, res, next) => {
   const match = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
@@ -29,6 +30,10 @@ export const withOrganization = wrap(async (req, res, next) => {
   });
   if (!member) throw new HttpError(403, 'Voce nao pertence a uma organizacao ativa.');
   req.orgId = member.org_id;
-  req.role = member.role;
+  req.role = normalizeRole(member.role);
+  const accessRole = await prisma.accessRole.findFirst({where:{org_id:member.org_id,slug:req.role},select:{permissions:true,name:true}});
+  if(!accessRole || !Array.isArray(accessRole.permissions)) throw new HttpError(403, 'Cargo sem permissões configuradas. Execute as migrations do banco.');
+  req.permissions = accessRole.permissions.filter(p=>typeof p==='string');
+  req.roleName = accessRole.name;
   next();
 });

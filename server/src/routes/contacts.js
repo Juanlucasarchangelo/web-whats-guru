@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { can } from '../services/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -51,7 +52,7 @@ export function contactsRouter() {
     res.json(await prisma.contact.findFirst({ where: { id, org_id: req.orgId } }));
   }));
   router.delete('/:id', wrap(async (req, res) => {
-    if (!['owner', 'admin'].includes(req.role)) throw new HttpError(403, 'Somente administradores podem excluir contatos.');
+    if (!can(req,'contacts.delete')) throw new HttpError(403, 'Somente administradores podem excluir contatos.');
     const id = idParam.parse(req.params.id);
     const result = await prisma.contact.deleteMany({ where: { id, org_id: req.orgId } });
     if (!result.count) throw new HttpError(404, 'Contato nao encontrado.');

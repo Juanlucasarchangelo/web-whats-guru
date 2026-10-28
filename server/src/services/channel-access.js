@@ -1,19 +1,20 @@
-/** Channel access is granted to owners/admins or agents who belong to a linked team.
+/** Channel access is granted to masters/administrators or commercial users who belong to a linked team.
  * Unrestricted channels (team_ids empty) remain accessible to all active members.
  */
 import { prisma } from '../db.js';
 import { HttpError } from '../http.js';
 import { mayAccessChannel } from './channel-policy.js';
-export const admin = req => ['owner','admin'].includes(req.role);
+import { can, normalizeRole } from './permissions.js';
+export const admin = req => can(req,'team.teams.manage');
 export async function visibleChannelIds(req, tx=prisma) {
   const integrations = await tx.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'},select:{id:true,config:true}});
-  if(admin(req)) return integrations.map(i=>i.id);
+  if(admin(req) || (can(req,'page.reports') && !can(req,'page.inbox'))) return integrations.map(i=>i.id);
   const memberships = await tx.teamMember.findMany({where:{user_id:req.user.id,team_id:{in: (await tx.team.findMany({where:{org_id:req.orgId},select:{id:true}})).map(t=>t.id)}},select:{team_id:true}});
   const myTeams = new Set(memberships.map(m=>m.team_id));
   return integrations.filter(i=>mayAccessChannel(req.role,i.config?.team_ids,myTeams)).map(i=>i.id);
 }
 export async function conversationScope(req, tx=prisma) {
-  if (admin(req)) return {org_id:req.orgId};
+  if (admin(req) || (can(req,'page.reports') && !can(req,'page.inbox'))) return {org_id:req.orgId};
   const ids=await visibleChannelIds(req,tx);
   return {org_id:req.orgId,OR:[{channel:{not:'whatsapp'}},{channel:'whatsapp',integration_id:{in:ids}}]};
 }
@@ -27,7 +28,7 @@ export async function requireAssigneeForChannel(orgId, userId, integrationId, tx
   if(!userId || !integrationId)return;
   const member=await tx.orgMember.findFirst({where:{org_id:orgId,user_id:userId,status:'active'}});
   if(!member)throw new HttpError(400,'Atendente nao pertence a esta empresa.');
-  if(['owner','admin'].includes(member.role))return;
+  if(['master','administrador'].includes(normalizeRole(member.role)))return;
   const channel=await tx.integration.findFirst({where:{id:integrationId,org_id:orgId,type:'whatsapp'}});
   if(!channel)throw new HttpError(404,'Numero WhatsApp nao encontrado.');
   const teams=Array.isArray(channel.config?.team_ids)?channel.config.team_ids:[];

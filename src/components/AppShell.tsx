@@ -4,7 +4,7 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, Shield, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
+  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
 } from 'lucide-react';
 
 export type PageId =
@@ -34,7 +34,7 @@ const navItems: { id: PageId; label: string; icon: typeof LayoutDashboard }[] = 
 
 export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
   const { user, profile, signOut } = useAuth();
-  const { currentOrg, currentMembership, organizations, switchOrganization } = useOrg();
+  const { currentOrg, currentMembership, organizations, switchOrganization, can, roleName } = useOrg();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [areaTecnicaOpen,setAreaTecnicaOpen] = useState(false);
@@ -50,7 +50,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
     setTheme(next);
   }
 
-  const isAdmin = currentMembership?.role === 'owner' || currentMembership?.role === 'admin';
 
   function handleNavigate(page: PageId) {
     onNavigate(page);
@@ -96,7 +95,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-900 truncate">{currentOrg?.name ?? 'Fala Comigo'}</p>
-              <p className="text-xs text-slate-400 capitalize">{currentMembership?.role ?? 'equipe'}</p>
+              <p className="text-xs text-slate-400 capitalize">{roleName || currentMembership?.role || 'Equipe'}</p>
             </div>
           </div>
           {organizations.length > 1 && <select className="input w-full text-sm mt-2" aria-label="Empresa ativa" value={currentOrg?.id || ''} onChange={e => switchOrganization(e.target.value)}>
@@ -106,25 +105,22 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-          {navItems.map((item) => {
+          {navItems.filter(item=>can(`page.${item.id}`)).map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
-            const restricted = (item.id === 'team' || item.id === 'settings') && !isAdmin;
             return (
               <button
                 key={item.id}
                 onClick={() => handleNavigate(item.id)}
-                className={`sidebar-item w-full ${isActive ? 'sidebar-item-active' : ''} ${restricted ? 'opacity-60' : ''}`}
-                title={restricted ? 'Acesso restrito a administradores' : undefined}
+                className={`sidebar-item w-full ${isActive ? 'sidebar-item-active' : ''} `}
               >
                 <Icon size={18} />
                 <span className="flex-1 text-left">{item.label}</span>
-                {restricted && <Shield size={14} className="text-slate-400" />}
               </button>
             );
           })}
-          {/* Subseção independente: ambas as telas também estão disponíveis publicamente por URL. */}
-          <button
+          {/* Área técnica: itens filtrados por permissões efetivas. */}
+          {(can('page.technicalOdd') || can('page.technicalReport')) && <button
             type="button"
             onClick={() => setAreaTecnicaOpen(open => !open)}
             aria-expanded={areaTecnicaOpen}
@@ -133,17 +129,17 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <Wrench size={18}/>
             <span className="flex-1 text-left">Área técnica</span>
             <ChevronDown size={16} className={`transition-transform ${areaTecnicaOpen ? 'rotate-180' : ''}`}/>
-          </button>
-          {areaTecnicaOpen && (
+          </button>}
+          {areaTecnicaOpen && (can('page.technicalOdd') || can('page.technicalReport')) && (
             <div className="ml-5 border-l border-slate-200 pl-2 space-y-0.5">
-              <button type="button" onClick={() => handleNavigate('technicalOdd')}
+              {can('page.technicalOdd') && <button type="button" onClick={() => handleNavigate('technicalOdd')}
                 className={`sidebar-item w-full ${currentPage === 'technicalOdd'?'sidebar-item-active':''}`}>
                 <ClipboardList size={16}/><span className="flex-1 text-left">ODD</span>
-              </button>
-              <button type="button" onClick={() => handleNavigate('technicalReport')}
+              </button>}
+              {can('page.technicalReport') && <button type="button" onClick={() => handleNavigate('technicalReport')}
                 className={`sidebar-item w-full ${currentPage === 'technicalReport'?'sidebar-item-active':''}`}>
                 <FileText size={16}/><span className="flex-1 text-left">Relatório técnico</span>
-              </button>
+              </button>}
             </div>
           )}
         </nav>
@@ -167,10 +163,10 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
 
           {userMenuOpen && (
             <div className="absolute left-3 right-3 bottom-full mb-1 rounded-lg bg-white shadow-lg ring-1 ring-slate-200 py-1 z-10">
-              <button
+              {can('page.profile') && <button
                 onClick={() => { setUserMenuOpen(false); handleNavigate('profile'); }}
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              ><UserRound size={16} />Meu perfil</button>
+              ><UserRound size={16} />Meu perfil</button>}
               <button
                 type="button"
                 onClick={toggleTheme}

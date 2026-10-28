@@ -53,7 +53,7 @@ export interface AuthMeResponse {
     id: string; user_id: string; full_name: string; avatar_url: string | null;
     phone: string | null; created_at: string; updated_at: string;
   } | null;
-  organizations: Array<{ id: string; name: string; slug: string; plan: string; status: string; role: 'owner' | 'admin' | 'agent' }>;
+  organizations: Array<{ id: string; name: string; slug: string; plan: string; status: string; role: string }>;
 }
 
 // Download autenticado de midias; nao exponha o token em URL de <img> ou <video>.

@@ -6,6 +6,9 @@ import type { Organization, OrgMember } from '@/types';
 interface OrgContextValue {
   currentOrg: Organization | null;
   currentMembership: OrgMember | null;
+  permissions: string[];
+  roleName: string;
+  can: (permission: string) => boolean;
   loading: boolean;
   refresh: () => Promise<void>;
   organizations: Array<{ id:string; name:string; role:string }> ;
@@ -18,12 +21,16 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [currentOrg, setCurrentOrg] = useState<Organization | null>(null);
   const [currentMembership, setCurrentMembership] = useState<OrgMember | null>(null);
   const [loading, setLoading] = useState(false);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [roleName, setRoleName] = useState('');
   const [organizations, setOrganizations] = useState<Array<{ id:string; name:string; role:string }>>([]);
 
   const refresh = useCallback(async () => {
     if (!user) {
       setCurrentOrg(null);
       setCurrentMembership(null);
+      setPermissions([]);
+      setRoleName('');
       setOrganizations([]);
       setLoading(false);
       return;
@@ -36,22 +43,29 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       if (!org) {
         setCurrentOrg(null);
         setCurrentMembership(null);
+        setPermissions([]);
+        setRoleName('');
         return;
       }
       selectOrg(org.id);
       setCurrentOrg({
         id: org.id, name: org.name, slug: org.slug, plan: org.plan,
-        status: org.status, owner_id: org.role === 'owner' ? user.id : '',
+        status: org.status, owner_id: org.role === 'master' ? user.id : '',
         settings: {}, created_at: '', updated_at: '',
       });
+      const access = await apiRequest<{role:string;role_name:string;permissions:string[]}>('/access/me');
+      setPermissions(access.permissions);
+      setRoleName(access.role_name);
       setCurrentMembership({
         id: '', org_id: org.id, user_id: user.id,
-        role: org.role, status: 'active', created_at: '',
+        role: access.role, status: 'active', created_at: '',
       });
     } catch (error) {
       console.error('Erro ao consultar organizacao local:', error);
       setCurrentOrg(null);
       setCurrentMembership(null);
+      setPermissions([]);
+      setRoleName('');
     } finally {
       setLoading(false);
     }
@@ -59,7 +73,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
   return (
-    <OrgContext.Provider value={{ currentOrg, currentMembership, loading, refresh, organizations, switchOrganization: (id:string) => { selectOrg(id); void refresh(); } }}>
+    <OrgContext.Provider value={{ currentOrg, currentMembership, permissions, roleName, can:(permission:string)=>permissions.includes(permission), loading, refresh, organizations, switchOrganization: (id:string) => { selectOrg(id); void refresh(); } }}>
       {children}
     </OrgContext.Provider>
   );
