@@ -29,6 +29,7 @@ model User {
   schedules      Schedule[]
   team_members   TeamMember[]
   user_profiles  UserProfile?
+  technical_documents TechnicalDocument[]
 
   @@map("users")
 }
@@ -61,6 +62,8 @@ model Organization {
   tags                    Tag[]
   teams                   Team[]
   access_roles            AccessRole[]
+  technical_documents     TechnicalDocument[]
+  technical_counters      TechnicalDocumentCounter[]
   webhook_events          WebhookEvent[]
 
   @@index([owner_id], map: "idx_organizations_owner_id")
@@ -485,4 +488,40 @@ model IntegrationCredential {
 
   @@index([org_id], map: "idx_integration_credentials_org_id")
   @@map("integration_credentials")
+}
+
+// Formulários técnicos persistidos por empresa; autoria pública ou autenticada.
+model TechnicalDocument {
+  id                  String    @id @default(uuid()) @db.Char(36)
+  org_id              String    @db.Char(36)
+  doc_type            String    @db.VarChar(24) // odd | technical_report
+  document_number     Int
+  client_request_id   String    @db.Char(36)
+  document_date       DateTime  @db.Date
+  client_name         String    @db.VarChar(120)
+  reference_number    String?   @db.VarChar(120) // Proposta (ODD) ou número ODD (relatório)
+  creator_user_id     String?   @db.Char(36)
+  creator_name        String    @db.VarChar(150)
+  creator_kind        String    @db.VarChar(24) // authenticated | public
+  payload             String    @db.LongText // JSON completo, com fotos JPEG em base64 para reemitir PDF
+  created_at          DateTime  @default(now())
+  organizations       Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator             User?     @relation(fields: [creator_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([org_id, doc_type, document_number], map: "uq_technical_documents_sequence")
+  @@unique([org_id, client_request_id], map: "uq_technical_documents_request")
+  @@index([org_id, doc_type, created_at], map: "idx_technical_documents_listing")
+  @@index([creator_user_id], map: "idx_technical_documents_creator")
+  @@map("technical_documents")
+}
+
+// Contador separado por empresa e tipo, com incremento atômico por transação.
+model TechnicalDocumentCounter {
+  org_id         String @db.Char(36)
+  doc_type       String @db.VarChar(24)
+  next_number    Int    @default(1)
+  organizations  Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([org_id, doc_type])
+  @@map("technical_document_counters")
 }

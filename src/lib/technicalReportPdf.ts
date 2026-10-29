@@ -5,7 +5,7 @@ import { importsBrLogoJpegDataUrl } from './importsbrLogoData';
 export type ReportStatus = 'concluido' | 'parcial' | 'pendente' | '';
 export type ReportPhoto = { dataUrl: string; name: string; width: number; height: number };
 export type TechnicalReportData = {
-  cliente: string; data: string; operacao: string; endereco: string;
+  cliente: string; data: string; operacao: string; endereco: string; numeroOdd?: string;
   tecnicos: string[]; status: ReportStatus; servico: string;
   pendencias: string[]; observacoes: string; fotos: ReportPhoto[];
 };
@@ -240,6 +240,7 @@ export function generatePendingPdf(data: TechnicalReportData): Blob {
 export type OddTechnician = { nome: string; funcao: string };
 export type OddData = {
   coordenador: string;
+  numeroProposta?: string;
   data: string;
   cliente: string;
   endereco: string;
@@ -249,7 +250,7 @@ export type OddData = {
 };
 
 const ODD_END = 784;
-function oddHeader(pdf: PdfDocument, continuation = false) {
+function oddHeader(pdf: PdfDocument, continuation = false, numeroProposta?: string) {
   // Cabeçalho de duas colunas, inspirado no modelo ODD enviado pela ImportsBR.
   pdf.picture(importsBrLogoJpegDataUrl, 1024, 289, 40, 29, 135, 38);
   pdf.text(408, 54, continuation ? 'Ordem do Dia' : 'Ordem do Dia', 19, true);
@@ -277,7 +278,7 @@ function oddField(pdf: PdfDocument, x: number, y: number, label: string, value: 
 }
 export function generateOddPdf(data: OddData): Blob {
   const pdf = new PdfDocument('ImportsBR - Ordem do Dia');
-  oddHeader(pdf);
+  oddHeader(pdf, false, data.numeroProposta);
   let y = 125;
   y = oddSection(pdf, 'Dados gerais', undefined, y);
   const left = oddField(pdf, 40, y, 'Coordenador técnico', data.coordenador, 242);

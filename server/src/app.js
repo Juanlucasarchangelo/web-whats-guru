@@ -28,7 +28,11 @@ export function createApp(config) {
     if (!origin || config.origins.includes(origin)) return callback(null, true);
     return callback(new Error('Origem CORS nao permitida.'));
   } }));
-  app.use(express.json({ limit: '100kb' }));
+  // Formulários com fotografias requerem carga maior; nas demais rotas permanece 100 KB.
+  const regularJson = express.json({ limit: '100kb' });
+  app.use((req, res, next) => req.method === 'POST' &&
+    (req.path === '/api/technical-documents' || req.path === '/api/public/technical-documents')
+      ? next() : regularJson(req, res, next));
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'Muitas tentativas. Aguarde 15 minutos.' },
   });
@@ -47,6 +51,16 @@ export function createApp(config) {
 
   app.use('/api/webhooks/evolution', evolutionWebhookRouter());
   app.use('/api/auth', authRouter(config, authLimiter));
+  // Endpoint público é APENAS para criar; nenhum GET público consulta documentos.
+  const publicSubmitLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 30,
+    standardHeaders: 'draft-8', legacyHeaders: false,
+    message: { error: 'Limite de envios atingido. Tente novamente mais tarde.' },
+  });
+  app.use('/api/public/technical-documents', publicSubmitLimiter,
+    express.json({ limit: '80mb' }), publicTechnicalDocumentsRouter(config));
+  // O salvamento autenticado pode incluir fotografias, sem ampliar outras APIs.
+  app.use('/api/technical-documents', (req, res, next) => req.method === 'POST'
+    ? express.json({ limit: '80mb' })(req, res, next) : next());
   app.use('/api', authenticate(config), withOrganization, (() => {
     const secure = express.Router();
     secure.use('/access',accessRouter());

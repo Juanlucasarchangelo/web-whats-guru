@@ -10,7 +10,7 @@ import {
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
   | 'automations' | 'campaigns' | 'schedules' | 'reports'
-  | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport';
+  | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport' | 'monitoring';
 
 interface AppShellProps {
   currentPage: PageId;
@@ -124,7 +124,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             type="button"
             onClick={() => setAreaTecnicaOpen(open => !open)}
             aria-expanded={areaTecnicaOpen}
-            className={`sidebar-item w-full ${(currentPage === 'technicalOdd' || currentPage === 'technicalReport') ? 'sidebar-item-active' : ''}`}
+            className={`sidebar-item w-full ${(currentPage === 'technicalOdd' || currentPage === 'technicalReport' || currentPage === 'monitoring') ? 'sidebar-item-active' : ''}`}
           >
             <Wrench size={18}/>
             <span className="flex-1 text-left">Área técnica</span>

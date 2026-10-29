@@ -19,6 +19,7 @@ import { ProfilePage } from '@/pages/ProfilePage';
 import { useEffect, useState } from 'react';
 import { TechnicalReportPage } from '@/pages/TechnicalReportPage';
 import { OrderOfDayPage } from '@/pages/OrderOfDayPage';
+import { MonitoringPage } from '@/pages/MonitoringPage';
 
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
@@ -52,6 +53,7 @@ function AppContent() {
         campaigns: <CampaignsPage />,
         schedules: <SchedulesPage />,
         reports: <ReportsPage />,
+        monitoring: <MonitoringPage />,
         technicalOdd: <OrderOfDayPage embedded />,
         technicalReport: <TechnicalReportPage embedded />,
         team: <TeamPage />,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CalendarDays, CheckCircle2, ClipboardList, Download, FileDown, Loader2, Plus, Share2, Trash2, Wrench } from 'lucide-react';
 import { generateOddPdf, type OddData, type OddTechnician } from '@/lib/technicalReportPdf';
+import { newDocumentRequestId, saveTechnicalDocument } from '@/lib/technicalDocuments';
 
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const inputClass = 'w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2.5 text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20';
@@ -70,7 +71,7 @@ export function OrderOfDayPage({ embedded = false }: { embedded?: boolean }) {
     <main className="mx-auto max-w-4xl space-y-5 px-4 py-8 sm:px-6">
       <div className="mb-6"><div className="flex items-center gap-2 text-amber-700"><CalendarDays size={20} /><span className="text-sm font-bold uppercase tracking-wider">Documento de campo</span></div>
         <h1 className="mt-1 text-3xl font-extrabold tracking-tight">Ordem do Dia (ODD)</h1>
-        <p className="mt-1 text-sm text-slate-600">Organize a visita técnica, a equipe e os objetivos da obra. Gere um único PDF para compartilhar. Nenhum dado é enviado ao servidor.</p>
+        <p className="mt-1 text-sm text-slate-600">Organize a visita técnica, a equipe e os objetivos da obra. Gere um único PDF para compartilhar. O formulário é registrado para monitoramento.</p>
       </div>
       <Section number={1} title="Dados gerais"><div className="grid gap-4 sm:grid-cols-2">
         <div><label className={labelClass} htmlFor="odd-coordenador">Coordenador técnico *</label><input id="odd-coordenador" className={inputClass} maxLength={120} placeholder="Nome completo" value={coordenador} onChange={e => { invalidate(); setCoordenador(e.target.value); }} /></div>
