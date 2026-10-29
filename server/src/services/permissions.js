@@ -9,7 +9,6 @@ export const PERMISSIONS = [
   ['page.campaigns','Campanhas','Páginas'],
   ['page.schedules','Agendamentos','Páginas'],
   ['page.reports','Relatórios','Páginas'],
-  ['page.monitoring','Monitoramento · ODD e relatórios técnicos','Páginas'],
   ['page.technicalOdd','Área técnica · ODD','Páginas'],
   ['page.technicalReport','Área técnica · Relatório técnico','Páginas'],
   ['page.team','Equipe & Permissões','Páginas'],
@@ -29,8 +28,8 @@ export const NORMAL_KEYS = ALL_KEYS.filter(key=>!RESERVED.has(key));
 const pageKeys = ALL_KEYS.filter(k=>k.startsWith('page.'));
 export const SYSTEM_ROLES = [
  {slug:'master',name:'Master',description:'Acesso total e administração de cargos.',permissions:ALL_KEYS},
- {slug:'administrador',name:'Administrador',description:'Acesso geral e gestão da equipe, sem administrar cargos ou Masters.',permissions:NORMAL_KEYS.filter(p=>p!=='page.monitoring')},
- {slug:'comercial',name:'Comercial',description:'Atendimento comercial, equivalente ao antigo Atendente.',permissions:pageKeys.filter(p=>!['page.team','page.settings','page.monitoring'].includes(p))},
+ {slug:'administrador',name:'Administrador',description:'Acesso geral e gestão da equipe, sem administrar cargos ou Masters.',permissions:NORMAL_KEYS},
+ {slug:'comercial',name:'Comercial',description:'Atendimento comercial, equivalente ao antigo Atendente.',permissions:pageKeys.filter(p=>!['page.team','page.settings'].includes(p))},
  {slug:'supervisor',name:'Supervisor',description:'Somente área técnica e relatórios.',permissions:['page.reports','page.technicalOdd','page.technicalReport']},
  {slug:'tecnico',name:'Técnico',description:'Somente relatórios técnicos.',permissions:['page.technicalReport']},
 ];

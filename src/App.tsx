@@ -28,7 +28,7 @@ function AppContent() {
     const path = window.location.pathname.replace(/\/$/, '');
     return path === '/ordem-do-dia' || path === '/odd' ? 'technicalOdd' : path === '/relatorio-tecnico' ? 'technicalReport' : 'dashboard';
   });
-  const ordered: PageId[] = ['dashboard','inbox','contacts','crm','chatbots','automations','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];
+  const ordered: PageId[] = ['dashboard','inbox','contacts','crm','chatbots','automations','campaigns','schedules','reports','technicalOdd','technicalReport','team','settings','profile'];
   const firstAllowed = ordered.find(page => permissions.includes(`page.${page}`));
   useEffect(() => {
     if (!orgLoading && firstAllowed && !permissions.includes(`page.${currentPage}`)) setCurrentPage(firstAllowed);

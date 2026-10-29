@@ -1,5 +1,5 @@
 import { importsBrLogoJpegDataUrl } from './importsbrLogoData';
-/** O motor de PDF opera no navegador. O formulário é persistido pela tela chamadora.
+/** PDFs gerados 100% no navegador, sem rede, banco, NAS ou dependência externa.
  *  Texto selecionável em WinAnsi (português); imagens JPEG preservadas como imagens PDF.
  */
 export type ReportStatus = 'concluido' | 'parcial' | 'pendente' | '';
@@ -112,12 +112,8 @@ class PdfDocument {
   }
 }
 function fmtDate(value: string) { const [year, month, day] = value.split('-'); return year && month && day ? `${day}/${month}/${year}` : value; }
-function header(pdf: PdfDocument, subtitle: string, numeroOdd?: string) {
+function header(pdf: PdfDocument, subtitle: string) {
   pdf.picture(importsBrLogoJpegDataUrl, 1024, 289, 40, 30, 135, 38);
-  if (numeroOdd?.trim()) {
-    pdf.text(327, 48, 'NÚMERO ODD', 8, false, C.slate);
-    pdf.text(327, 65, numeroOdd.trim(), 10, true, C.black);
-  }
   pdf.text(435, 53, 'TÉCNICO  ·  ONLINE', 9, false, C.slate);
   pdf.rect(40, 85, 515, 2.5, C.yellow);
   pdf.text(40, 111, 'VISITA TÉCNICA', 10, false, C.red);
@@ -135,11 +131,11 @@ function field(pdf: PdfDocument, label: string, value: string, y: number) {
   pdf.line(40, next + 1, 555, next + 1, C.line);
   return next + 25;
 }
-function newPage(pdf: PdfDocument, title: string, numeroOdd?: string) { pdf.addPage(); header(pdf, title, numeroOdd); return 181; }
+function newPage(pdf: PdfDocument, title: string) { pdf.addPage(); header(pdf, title); return 181; }
 function remaining(y: number, height: number) { return y + height < 805; }
 
 export function generateTechnicalPdf(data: TechnicalReportData, includePendencias = false): Blob {
-  const pdf = new PdfDocument(); header(pdf, 'Relatório de Obra', data.numeroOdd); let y = 184;
+  const pdf = new PdfDocument(); header(pdf, 'Relatório de Obra'); let y = 184;
   y = section(pdf, 1, 'Identificação', y);
   y = field(pdf, 'Cliente', data.cliente, y);
   pdf.text(40, y, 'Data', 10, true); pdf.text(305, y, 'Operação', 10, true);
@@ -159,14 +155,14 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
   y += 59;
   pdf.text(40, y, 'Descrição do serviço realizado', 10, true); y += 22;
   for (const line of pdf.wrap(data.servico, 500, 11)) {
-    if (!remaining(y, 19)) { y = newPage(pdf, 'Relatório de Obra — Continuação', data.numeroOdd); }
+    if (!remaining(y, 19)) { y = newPage(pdf, 'Relatório de Obra — Continuação'); }
     pdf.text(40, y, line, 11); y += 17;
   }
   y += 25;
   // Observações vêm no final do documento (após as fotografias), como no modelo.
   if (data.fotos.length) {
     for (let i = 0; i < data.fotos.length; i++) {
-      y = newPage(pdf, 'Registro Fotográfico', data.numeroOdd);
+      y = newPage(pdf, 'Registro Fotográfico');
       y = section(pdf, 4, 'Registro fotográfico', y);
       pdf.text(40, y, `Fotografia ${i + 1} de ${data.fotos.length}`, 10, false, C.slate); y += 20;
       const isLast = i === data.fotos.length - 1;
@@ -177,21 +173,21 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
       if (isLast && data.observacoes.trim()) {
         y = section(pdf, 5, 'Observações', y);
         for (const line of pdf.wrap(data.observacoes, 500, 10)) {
-          if (!remaining(y, 18)) y = newPage(pdf, 'Observações', data.numeroOdd);
+          if (!remaining(y, 18)) y = newPage(pdf, 'Observações');
           pdf.text(40, y, line, 10); y += 16;
         }
       }
     }
   } else {
-    if (!remaining(y, 100)) y = newPage(pdf, 'Observações', data.numeroOdd);
+    if (!remaining(y, 100)) y = newPage(pdf, 'Observações');
     y = section(pdf, 4, 'Observações', y);
     const lines = pdf.wrap(data.observacoes || 'Sem observações registradas.', 500, 11);
-    for (const line of lines) { if (!remaining(y, 19)) y = newPage(pdf, 'Observações', data.numeroOdd); pdf.text(40, y, line, 11); y += 17; }
+    for (const line of lines) { if (!remaining(y, 19)) y = newPage(pdf, 'Observações'); pdf.text(40, y, line, 11); y += 17; }
   }
   if (includePendencias) {
     // O relatório completo inclui tudo que existe no relatório sem pendências,
     // acrescentando as pendências em seção própria ao final do documento.
-    y = newPage(pdf, 'Relatório Completo — Pendências', data.numeroOdd);
+    y = newPage(pdf, 'Relatório Completo — Pendências');
     y = section(pdf, 6, 'Pendências registradas', y);
     const pending = data.pendencias.map(item => item.trim()).filter(Boolean);
     if (!pending.length) {
@@ -199,15 +195,15 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
     } else {
       for (let i = 0; i < pending.length; i++) {
         const lines = pdf.wrap(pending[i], 475, 11);
-        if (!remaining(y, 60)) y = newPage(pdf, 'Pendências — Continuação', data.numeroOdd);
+        if (!remaining(y, 60)) y = newPage(pdf, 'Pendências — Continuação');
         pdf.text(40, y, `PENDÊNCIA ${String(i + 1).padStart(2, '0')}`, 10, true, C.red);
         y += 24;
         for (const line of lines) {
-          if (!remaining(y, 22)) y = newPage(pdf, 'Pendências — Continuação', data.numeroOdd);
+          if (!remaining(y, 22)) y = newPage(pdf, 'Pendências — Continuação');
           pdf.text(40, y, line, 11);
           y += 18;
         }
-        if (!remaining(y, 24)) y = newPage(pdf, 'Pendências — Continuação', data.numeroOdd);
+        if (!remaining(y, 24)) y = newPage(pdf, 'Pendências — Continuação');
         pdf.line(40, y + 3, 555, y + 3, C.line);
         y += 25;
       }
@@ -217,7 +213,7 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
 }
 
 export function generatePendingPdf(data: TechnicalReportData): Blob {
-  const pdf = new PdfDocument(); header(pdf, 'Relatório de Pendências', data.numeroOdd); let y = 184;
+  const pdf = new PdfDocument(); header(pdf, 'Relatório de Pendências'); let y = 184;
   y = section(pdf, 1, 'Identificação', y);
   y = field(pdf, 'Cliente', data.cliente, y);
   pdf.text(40, y, 'Data', 10, true); pdf.text(305, y, 'Operação', 10, true);
@@ -229,7 +225,7 @@ export function generatePendingPdf(data: TechnicalReportData): Blob {
   if (!pending.length) { pdf.text(40, y, 'Nenhuma pendência registrada nesta visita.', 11, false, C.green); }
   pending.forEach((text, i) => {
     const lines = pdf.wrap(text, 475, 11); const blockHeight = 30 + lines.length * 18;
-    if (!remaining(y, blockHeight)) y = newPage(pdf, 'Pendências — Continuação', data.numeroOdd);
+    if (!remaining(y, blockHeight)) y = newPage(pdf, 'Pendências — Continuação');
     pdf.rect(40, y - 2, 3, blockHeight - 7, C.red);
     pdf.text(54, y + 13, `PENDÊNCIA ${String(i + 1).padStart(2, '0')}`, 10, true, C.red);
     let py = y + 35;
@@ -257,10 +253,6 @@ const ODD_END = 784;
 function oddHeader(pdf: PdfDocument, continuation = false, numeroProposta?: string) {
   // Cabeçalho de duas colunas, inspirado no modelo ODD enviado pela ImportsBR.
   pdf.picture(importsBrLogoJpegDataUrl, 1024, 289, 40, 29, 135, 38);
-  if (numeroProposta?.trim()) {
-    pdf.text(322, 48, 'PROPOSTA', 8, false, C.slate);
-    pdf.text(322, 65, numeroProposta.trim(), 10, true, C.black);
-  }
   pdf.text(408, 54, continuation ? 'Ordem do Dia' : 'Ordem do Dia', 19, true);
   pdf.text(417, 70, 'VISITA TECNICA DE OBRA', 8, false, C.slate);
   pdf.line(40, 89, 555, 89, C.black, 1.5);

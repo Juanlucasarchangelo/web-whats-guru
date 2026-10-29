@@ -17,7 +17,6 @@ import { operationsRouter } from './routes/operations.js';
 import { profileRouter } from './routes/profile.js';
 import { reportsRouter } from './routes/reports.js';
 import { accessRouter } from './routes/access.js';
-import { technicalDocumentsRouter, publicTechnicalDocumentsRouter } from './routes/technical-documents.js';
 import { requirePermission, requireAny } from './services/permissions.js';
 import { guardOperations, guardLocal } from './middleware/route-permissions.js';
 
@@ -44,7 +43,7 @@ export function createApp(config) {
       await prisma.$queryRaw`SELECT 1 AS ok`;
       const [tables] = await prisma.$queryRaw`SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations'`;
       const count = Number(tables?.total ?? 0);
-      return res.status(count === 27 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 27 });
+      return res.status(count === 25 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 25 });
     } catch {
       return res.status(503).json({ api: 'online', mysql: 'disconnected' });
     }
@@ -81,7 +80,6 @@ export function createApp(config) {
     secure.use('/operations', guardOperations, operationsRouter());
     secure.use('/profile', requirePermission('page.profile'), profileRouter());
     secure.use('/reports', requirePermission('page.reports'), reportsRouter());
-    secure.use('/technical-documents', technicalDocumentsRouter());
     secure.use('/local', guardLocal, localDataRouter());
     secure.use('/team', requirePermission('page.team'), teamRouter());
     secure.use('/channels', requireAny('page.inbox','page.team','page.settings'), channelsRouter());

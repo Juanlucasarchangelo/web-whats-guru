@@ -4,7 +4,7 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText, FolderSearch,
+  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
 } from 'lucide-react';
 
 export type PageId =
@@ -120,7 +120,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             );
           })}
           {/* Área técnica: itens filtrados por permissões efetivas. */}
-          {(can('page.technicalOdd') || can('page.technicalReport') || can('page.monitoring')) && <button
+          {(can('page.technicalOdd') || can('page.technicalReport')) && <button
             type="button"
             onClick={() => setAreaTecnicaOpen(open => !open)}
             aria-expanded={areaTecnicaOpen}
@@ -130,7 +130,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <span className="flex-1 text-left">Área técnica</span>
             <ChevronDown size={16} className={`transition-transform ${areaTecnicaOpen ? 'rotate-180' : ''}`}/>
           </button>}
-          {areaTecnicaOpen && (can('page.technicalOdd') || can('page.technicalReport') || can('page.monitoring')) && (
+          {areaTecnicaOpen && (can('page.technicalOdd') || can('page.technicalReport')) && (
             <div className="ml-5 border-l border-slate-200 pl-2 space-y-0.5">
               {can('page.technicalOdd') && <button type="button" onClick={() => handleNavigate('technicalOdd')}
                 className={`sidebar-item w-full ${currentPage === 'technicalOdd'?'sidebar-item-active':''}`}>
@@ -139,10 +139,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
               {can('page.technicalReport') && <button type="button" onClick={() => handleNavigate('technicalReport')}
                 className={`sidebar-item w-full ${currentPage === 'technicalReport'?'sidebar-item-active':''}`}>
                 <FileText size={16}/><span className="flex-1 text-left">Relatório técnico</span>
-              </button>}
-              {can('page.monitoring') && <button type="button" onClick={() => handleNavigate('monitoring')}
-                className={`sidebar-item w-full ${currentPage === 'monitoring'?'sidebar-item-active':''}`}>
-                <FolderSearch size={16}/><span className="flex-1 text-left">Monitoramento</span>
               </button>}
             </div>
           )}
