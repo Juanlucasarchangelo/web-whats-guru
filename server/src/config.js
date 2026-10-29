@@ -18,6 +18,7 @@ export function getConfig() {
     jwtSecret,
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '12h',
     allowRegistration: process.env.ALLOW_REGISTRATION === 'true',
+    publicTechnicalOrgId: process.env.PUBLIC_TECHNICAL_ORG_ID?.trim() || null,
     origins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
       .split(',').map((o) => o.trim()).filter(Boolean),
   };

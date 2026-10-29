@@ -7,6 +7,12 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      // Famílias oficiais da marca. Não altera classes de tamanho ou layout.
+      fontFamily: {
+        sans: ['Archivo', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['Jost', 'Archivo', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'ui-monospace', 'Consolas', 'monospace'],
+      },
       colors: {
         slate: shades('slate', [50,100,200,300,400,500,600,700,800,900]),
         blue: shades('blue', [50,100,200,300,400,500,600,700,800,900,950]),

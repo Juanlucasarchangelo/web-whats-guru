@@ -66,8 +66,14 @@
     --ui-blue-950: 49 37 18;
   }
   * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; @apply bg-slate-50 text-slate-900; }
-  h1, h2, h3, h4, h5, h6 { @apply font-semibold tracking-tight; }
+  /* Manual ImportsBR: Archivo para toda a interface; Jost nos títulos;
+     IBM Plex Mono nos dados técnicos. Os tamanhos/medidas existentes ficam
+     intocados para não modificar a geometria das telas. */
+  body { font-family: 'Archivo', system-ui, -apple-system, sans-serif; @apply bg-slate-50 text-slate-900; }
+  h1, h2, h3, h4, h5, h6 { font-family: 'Jost', 'Archivo', sans-serif; letter-spacing: -0.015em; }
+  button, input, select, textarea, optgroup, option { font-family: 'Archivo', system-ui, -apple-system, sans-serif; }
+  code, pre, kbd, samp, output { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  input[type='number'], input[type='date'], input[type='time'], input[type='datetime-local'] { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
   input, textarea, select { color: rgb(var(--ui-slate-900)); background-color: rgb(var(--ui-surface)); }
   input::placeholder, textarea::placeholder { color: rgb(var(--ui-slate-400)); }
   /* A imagem QR deve ficar sobre superfície clara para leitura. */
@@ -113,3 +119,17 @@
 :root[data-theme='dark'] :is(.text-purple-600, .text-purple-700, .text-purple-900, .text-pink-600, .text-pink-700, .text-indigo-600, .text-indigo-700) { color: #D9B9EE; }
 :root[data-theme='dark'] :is(.text-orange-600, .text-orange-700) { color: #FBC29A; }
 :root[data-theme='dark'] :is(.text-teal-600, .text-teal-700) { color: #91E0D4; }
+
+/* ========================================================================== */
+/* TYPOGRAFIA IMPORTSBR · manual v1.0 · sem alterar estrutura ou layout         */
+/* ========================================================================== */
+
+/* As fontes oficiais disponibilizam estes pesos: Archivo até 600; Jost até 500. */
+.font-bold, .font-extrabold, .font-black, b, strong, th { font-weight: 600; }
+.font-mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+/* Hierarquia tipográfica Jost. Mantemos os tamanhos de cada tela existentes. */
+h1, h1[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 300; letter-spacing: -0.015em; }
+h2, h2[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 400; letter-spacing: -0.015em; }
+h3, h3[class], h4, h4[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 400; letter-spacing: -0.015em; }
+h5, h5[class], h6, h6[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 500; letter-spacing: -0.015em; }

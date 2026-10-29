@@ -4,10 +4,25 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
+import { can, isMaster, normalizeRole } from '../services/permissions.js';
 const id=z.string().uuid();
-const isAdmin=req=>['owner','admin'].includes(req.role);
-const checkAdmin=req=>{if(!isAdmin(req))throw new HttpError(403,'Somente administradores podem gerenciar a equipe.');};
-const checkOwner=req=>{if(req.role!=='owner')throw new HttpError(403,'Somente o proprietario pode gerenciar permissoes de usuarios.');};
+const slugSchema=z.string().trim().regex(/^[a-z][a-z0-9_]{1,31}$/);
+const isAdmin=req=>can(req,'team.teams.manage');
+const checkAdmin=req=>{if(!isAdmin(req))throw new HttpError(403,'Sem permissao para gerenciar times.');};
+const checkMembers=req=>{if(!can(req,'team.members.manage'))throw new HttpError(403,'Sem permissao para gerenciar usuarios.');};
+async function ensureAssignable(req, slug) {
+ const role=await prisma.accessRole.findFirst({where:{org_id:req.orgId,slug},select:{slug:true}});
+ if(!role)throw new HttpError(400,'Cargo invalido para esta empresa.');
+ if(slug==='master' && !isMaster(req))throw new HttpError(403,'Somente Master pode criar ou atribuir Master.');
+}
+async function protectMember(req,member){
+ if(member.user_id===req.user.id)throw new HttpError(403,'Nao e permitido alterar seu proprio cargo ou acesso.');
+ if(normalizeRole(member.role)==='master'){
+  if(!isMaster(req))throw new HttpError(403,'Somente Master pode modificar outro Master.');
+  const count=await prisma.orgMember.count({where:{org_id:req.orgId,role:{in:['master','owner']},status:'active'}});
+  if(count<=1)throw new HttpError(403,'A empresa deve manter pelo menos um Master ativo.');
+ }
+}
 export function teamRouter() {
  const router=Router();
  router.get('/overview',wrap(async(req,res)=>{
@@ -23,8 +38,9 @@ export function teamRouter() {
   res.json({members:members.map(m=>({...m,email:up.get(m.user_id)?.email??'',full_name:pp.get(m.user_id)?.full_name??'Usuario',is_active:up.get(m.user_id)?.is_active??false})),teams,team_members:teamMembers});
  }));
  router.post('/users',wrap(async(req,res)=>{
-  checkOwner(req);
-  const data=z.object({full_name:z.string().trim().min(2).max(150),email:z.string().trim().email().max(254).transform(x=>x.toLowerCase()),role:z.enum(['admin','agent']).default('agent')}).strict().parse(req.body);
+  checkMembers(req);
+  const data=z.object({full_name:z.string().trim().min(2).max(150),email:z.string().trim().email().max(254).transform(x=>x.toLowerCase()),role:slugSchema.default('comercial')}).strict().parse(req.body);
+  await ensureAssignable(req,data.role);
   if(await prisma.user.findUnique({where:{email:data.email},select:{id:true}}))throw new HttpError(409,'E-mail ja cadastrado. Use Adicionar usuario existente.');
   const initialPassword=randomBytes(24).toString('base64url');
   const hash=await bcrypt.hash(initialPassword,12);const userId=randomUUID();
@@ -36,12 +52,14 @@ export function teamRouter() {
   res.status(201).json({email:data.email,initial_password:initialPassword});
  }));
  router.post('/members',wrap(async(req,res)=>{
-  checkOwner(req);
-  const {email,role}=z.object({email:z.string().email().max(254),role:z.enum(['agent','admin']).default('agent')}).strict().parse(req.body);
+  checkMembers(req);
+  const {email,role}=z.object({email:z.string().email().max(254),role:slugSchema.default('comercial')}).strict().parse(req.body);
+  await ensureAssignable(req,role);
   const user=await prisma.user.findUnique({where:{email:email.trim().toLowerCase()},select:{id:true,is_active:true}});
   if(!user?.is_active)throw new HttpError(404,'Usuario nao cadastrado ou inativo. Crie uma conta na tela de cadastro antes de adicionar.');
   const existing=await prisma.orgMember.findFirst({where:{org_id:req.orgId,user_id:user.id}});
   if(existing){
+   if(normalizeRole(existing.role)==='master' && !isMaster(req))throw new HttpError(403,'Somente Master pode modificar membros Master.');
    if(existing.status==='active')throw new HttpError(409,'Usuario ja pertence a esta empresa.');
    const updated=await prisma.orgMember.update({where:{id:existing.id},data:{status:'active',role}});
    return res.json(updated);
@@ -49,19 +67,20 @@ export function teamRouter() {
   res.status(201).json(await prisma.orgMember.create({data:{id:randomUUID(),org_id:req.orgId,user_id:user.id,role,status:'active'}}));
  }));
  router.patch('/members/:id',wrap(async(req,res)=>{
-  checkOwner(req);const memberId=id.parse(req.params.id);
-  const {role,status}=z.object({role:z.enum(['agent','admin']).optional(),status:z.enum(['active','inactive']).optional()}).strict().parse(req.body);
+  checkMembers(req);const memberId=id.parse(req.params.id);
+  const {role,status}=z.object({role:slugSchema.optional(),status:z.enum(['active','inactive']).optional()}).strict().parse(req.body);
   if(!role&&!status)throw new HttpError(400,'Nenhuma alteracao enviada.');
   const member=await prisma.orgMember.findFirst({where:{id:memberId,org_id:req.orgId}});
   if(!member)throw new HttpError(404,'Membro nao encontrado.');
-  if(member.role==='owner'||member.user_id===req.user.id)throw new HttpError(403,'Nao pode modificar proprietario ou seu proprio acesso.');
+  await protectMember(req,member);
+  if(role)await ensureAssignable(req,role);
   res.json(await prisma.orgMember.update({where:{id:memberId},data:{...(role?{role}:{}),...(status?{status}:{})}}));
  }));
  router.delete('/members/:id',wrap(async(req,res)=>{
-  checkOwner(req);const memberId=id.parse(req.params.id);
+  checkMembers(req);const memberId=id.parse(req.params.id);
   const member=await prisma.orgMember.findFirst({where:{id:memberId,org_id:req.orgId}});
   if(!member)throw new HttpError(404,'Membro nao encontrado.');
-  if(member.role==='owner'||member.user_id===req.user.id)throw new HttpError(403,'Proprietario e usuario atual nao podem ser removidos.');
+  await protectMember(req,member);
   // Soft-disable membership; historical assignment stays intact, access is revoked immediately.
   await prisma.$transaction(async tx=>{
    await tx.teamMember.deleteMany({where:{user_id:member.user_id,team_id:{in:(await tx.team.findMany({where:{org_id:req.orgId},select:{id:true}})).map(t=>t.id)}}});

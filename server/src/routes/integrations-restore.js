@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { can } from '../services/permissions.js';
 import { randomBytes, randomUUID, createCipheriv, createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -18,7 +19,7 @@ export function encrypt(value) {
   const ciphertext=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);
   return `enc:${Buffer.concat([iv,cipher.getAuthTag(),ciphertext]).toString('base64')}`;
 }
-function checkAdmin(req) {if(!['owner','admin'].includes(req.role))throw new HttpError(403,'Somente administrador.');}
+function checkAdmin(req) {if(!can(req,'settings.manage'))throw new HttpError(403,'Somente administrador.');}
 export async function providerUrl(input){
   let url;
   try { url = new URL(input); } catch { throw new HttpError(400, 'URL Evolution inválida'); }
