@@ -13,22 +13,22 @@ try {
     console.log(`Converso API: http://${config.host}:${config.port}/api/health`);
     console.log('Backend local iniciado. Frontend utiliza API MySQL.');
     if (process.env.EVOLUTION_AUTO_WEBHOOK === 'true') {
-      const publicUrl=process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim();
-      const secret=process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
+      const publicUrl = process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim();
+      const secret = process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
       if (!publicUrl || !secret || secret.length < 32 || !/^https?:\/\//.test(publicUrl)) {
         console.error('[Evolution Webhook] Configuracao incompleta: verifique EVOLUTION_WEBHOOK_PUBLIC_URL e EVOLUTION_WEBHOOK_SECRET (>=32 caracteres).');
       } else {
-        (async()=>{
-          const integrations=await prisma.integration.findMany({where:{type:'whatsapp'},select:{id:true,org_id:true,config:true}});
+        (async () => {
+          const integrations = await prisma.integration.findMany({ where: { type: 'whatsapp' }, select: { id: true, org_id: true, config: true } });
           for (const integration of integrations) {
-            if(integration.config?.provider!=='evolution_api')continue;
+            if (integration.config?.provider !== 'evolution_api') continue;
             try {
-              const endpoint=`${publicUrl.replace(/\/$/,'')}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
-              const result=await configureEvolutionWebhook(integration.org_id,endpoint,integration.id);
-              console.info('[Evolution Webhook] Registro automatico:',{instance:result.instance,ok:result.ok});
-            }catch(err){console.error('[Evolution Webhook] Falha de registro:',{code:err?.code||'ERROR',message:err?.message});}
+              const endpoint = `${publicUrl.replace(/\/$/, '')}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
+              const result = await configureEvolutionWebhook(integration.org_id, endpoint, integration.id);
+              console.info('[Evolution Webhook] Registro automatico:', { instance: result.instance, ok: result.ok });
+            } catch (err) { console.error('[Evolution Webhook] Falha de registro:', { code: err?.code || 'ERROR', message: err?.message }); }
           }
-        })().catch(e=>console.error('[Evolution Webhook] Falha de inicializacao:',e?.message));
+        })().catch(e => console.error('[Evolution Webhook] Falha de inicializacao:', e?.message));
       }
     }
   });
@@ -37,9 +37,9 @@ try {
     workflowTick().catch(error => console.error('[Workflow] Erro no agendador:', error.message));
   }, 30000);
   workflowTimer.unref?.();
-  const operationTimer=setInterval(()=>{
-    operationsTick().catch(e=>console.error('[Campanhas/Agendamentos] Erro na fila:',e.message));
-  },30000);
+  const operationTimer = setInterval(() => {
+    operationsTick().catch(e => console.error('[Campanhas/Agendamentos] Erro na fila:', e.message));
+  }, 30000);
   operationTimer.unref?.();
   async function shutdown() {
     clearInterval(workflowTimer);

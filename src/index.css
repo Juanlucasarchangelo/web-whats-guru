@@ -4,13 +4,20 @@
 
 /* Whats-Guru: tokens cromáticos. Tema escuro é o padrão. */
 @layer base {
-  :root, :root[data-theme='dark'] {
+
+  :root,
+  :root[data-theme='dark'] {
     color-scheme: dark;
-    --brand-ink: 26 26 26;           /* Preto Imports #1A1A1A */
-    --brand-steel: 92 92 92;         /* Aço #5C5C5C */
-    --brand-amber: 255 199 52;      /* Âmbar #FFC734 */
-    --brand-paper: 242 242 240;     /* Papel #F2F2F0 */
-    --brand-deep-amber: 184 135 26; /* Âmbar profundo #B8871A */
+    --brand-ink: 26 26 26;
+    /* Preto Imports #1A1A1A */
+    --brand-steel: 92 92 92;
+    /* Aço #5C5C5C */
+    --brand-amber: 255 199 52;
+    /* Âmbar #FFC734 */
+    --brand-paper: 242 242 240;
+    /* Papel #F2F2F0 */
+    --brand-deep-amber: 184 135 26;
+    /* Âmbar profundo #B8871A */
     --ui-surface: 34 34 34;
     --ui-on-accent: 26 26 26;
     --ui-scroll: 92 92 92;
@@ -37,6 +44,7 @@
     --ui-blue-900: 255 230 157;
     --ui-blue-950: 35 31 24;
   }
+
   :root[data-theme='light'] {
     color-scheme: light;
     --ui-surface: 255 255 255;
@@ -65,71 +73,260 @@
     --ui-blue-900: 82 58 14;
     --ui-blue-950: 49 37 18;
   }
-  * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   /* Manual ImportsBR: Archivo para toda a interface; Jost nos títulos;
      IBM Plex Mono nos dados técnicos. Os tamanhos/medidas existentes ficam
      intocados para não modificar a geometria das telas. */
-  body { font-family: 'Archivo', system-ui, -apple-system, sans-serif; @apply bg-slate-50 text-slate-900; }
-  h1, h2, h3, h4, h5, h6 { font-family: 'Jost', 'Archivo', sans-serif; letter-spacing: -0.015em; }
-  button, input, select, textarea, optgroup, option { font-family: 'Archivo', system-ui, -apple-system, sans-serif; }
-  code, pre, kbd, samp, output { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
-  input[type='number'], input[type='date'], input[type='time'], input[type='datetime-local'] { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
-  input, textarea, select { color: rgb(var(--ui-slate-900)); background-color: rgb(var(--ui-surface)); }
-  input::placeholder, textarea::placeholder { color: rgb(var(--ui-slate-400)); }
+  body {
+    font-family: 'Archivo', system-ui, -apple-system, sans-serif;
+    @apply bg-slate-50 text-slate-900;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Jost', 'Archivo', sans-serif;
+    letter-spacing: -0.015em;
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  optgroup,
+  option {
+    font-family: 'Archivo', system-ui, -apple-system, sans-serif;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp,
+  output {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type='number'],
+  input[type='date'],
+  input[type='time'],
+  input[type='datetime-local'] {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input,
+  textarea,
+  select {
+    color: rgb(var(--ui-slate-900));
+    background-color: rgb(var(--ui-surface));
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--ui-slate-400));
+  }
+
   /* A imagem QR deve ficar sobre superfície clara para leitura. */
-  img[alt='QR Code da instância Evolution'] { background-color: #F2F2F0; }
+  img[alt='QR Code da instância Evolution'] {
+    background-color: #F2F2F0;
+  }
 }
 
 @layer components {
-  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-brand-on-accent shadow-sm transition-all hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed; }
-  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-all hover:bg-slate-100 active:scale-[0.98] disabled:opacity-50; }
-  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] disabled:opacity-50; }
-  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900; }
-  .input { @apply block w-full rounded-lg border-0 py-2.5 px-3.5 bg-white text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 transition-all text-sm; }
-  .input-error { @apply ring-red-400 focus:ring-red-500; }
-  .label { @apply block text-sm font-medium leading-6 text-slate-700 mb-1.5; }
-  .card { @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200/80; }
-  .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
-  .badge-blue { @apply bg-blue-50 text-blue-700 ring-1 ring-blue-200; }
-  .badge-green { @apply bg-green-50 text-green-700 ring-1 ring-green-200; }
-  .badge-yellow { @apply bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200; }
-  .badge-red { @apply bg-red-50 text-red-700 ring-1 ring-red-200; }
-  .badge-gray { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
-  .badge-purple { @apply bg-pink-50 text-pink-700 ring-1 ring-pink-200; }
-  .sidebar-item { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 cursor-pointer; }
-  .sidebar-item-active { @apply bg-blue-50 text-blue-700 hover:bg-blue-50 hover:text-blue-700; }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-brand-on-accent shadow-sm transition-all hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-all hover:bg-slate-100 active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900;
+  }
+
+  .input {
+    @apply block w-full rounded-lg border-0 py-2.5 px-3.5 bg-white text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 transition-all text-sm;
+  }
+
+  .input-error {
+    @apply ring-red-400 focus:ring-red-500;
+  }
+
+  .label {
+    @apply block text-sm font-medium leading-6 text-slate-700 mb-1.5;
+  }
+
+  .card {
+    @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200/80;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-blue {
+    @apply bg-blue-50 text-blue-700 ring-1 ring-blue-200;
+  }
+
+  .badge-green {
+    @apply bg-green-50 text-green-700 ring-1 ring-green-200;
+  }
+
+  .badge-yellow {
+    @apply bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200;
+  }
+
+  .badge-red {
+    @apply bg-red-50 text-red-700 ring-1 ring-red-200;
+  }
+
+  .badge-gray {
+    @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200;
+  }
+
+  .badge-purple {
+    @apply bg-pink-50 text-pink-700 ring-1 ring-pink-200;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-all hover:bg-slate-100 hover:text-slate-900 cursor-pointer;
+  }
+
+  .sidebar-item-active {
+    @apply bg-blue-50 text-blue-700 hover:bg-blue-50 hover:text-blue-700;
+  }
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgb(var(--ui-scroll)); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgb(var(--ui-scroll-hover)); }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--ui-scroll));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--ui-scroll-hover));
+}
 
 /* Badges de estado conservam significado (sucesso/erro/alerta),
    mas usam fundos adequados ao contraste do tema escuro. */
-:root[data-theme='dark'] :is(.bg-green-50, .bg-green-100, .bg-emerald-50, .bg-emerald-100) { background-color: #20332A; }
-:root[data-theme='dark'] :is(.bg-red-50, .bg-red-100) { background-color: #3C2626; }
-:root[data-theme='dark'] :is(.bg-yellow-50, .bg-yellow-100, .bg-amber-50, .bg-amber-100) { background-color: #40351F; }
-:root[data-theme='dark'] :is(.bg-purple-50, .bg-purple-100, .bg-pink-50, .bg-pink-100, .bg-indigo-50, .bg-indigo-100) { background-color: #332C3A; }
-:root[data-theme='dark'] :is(.bg-orange-50, .bg-orange-100) { background-color: #3E3025; }
-:root[data-theme='dark'] :is(.bg-teal-50, .bg-teal-100) { background-color: #203637; }
-:root[data-theme='dark'] :is(.text-green-600, .text-green-700, .text-green-800) { color: #8CDCAC; }
-:root[data-theme='dark'] :is(.text-red-600, .text-red-700, .text-red-800) { color: #FFAAAA; }
-:root[data-theme='dark'] :is(.text-yellow-600, .text-yellow-700, .text-yellow-800, .text-amber-700, .text-amber-800, .text-amber-900) { color: #FFC734; }
-:root[data-theme='dark'] :is(.text-purple-600, .text-purple-700, .text-purple-900, .text-pink-600, .text-pink-700, .text-indigo-600, .text-indigo-700) { color: #D9B9EE; }
-:root[data-theme='dark'] :is(.text-orange-600, .text-orange-700) { color: #FBC29A; }
-:root[data-theme='dark'] :is(.text-teal-600, .text-teal-700) { color: #91E0D4; }
+:root[data-theme='dark'] :is(.bg-green-50, .bg-green-100, .bg-emerald-50, .bg-emerald-100) {
+  background-color: #20332A;
+}
+
+:root[data-theme='dark'] :is(.bg-red-50, .bg-red-100) {
+  background-color: #3C2626;
+}
+
+:root[data-theme='dark'] :is(.bg-yellow-50, .bg-yellow-100, .bg-amber-50, .bg-amber-100) {
+  background-color: #40351F;
+}
+
+:root[data-theme='dark'] :is(.bg-purple-50, .bg-purple-100, .bg-pink-50, .bg-pink-100, .bg-indigo-50, .bg-indigo-100) {
+  background-color: #332C3A;
+}
+
+:root[data-theme='dark'] :is(.bg-orange-50, .bg-orange-100) {
+  background-color: #3E3025;
+}
+
+:root[data-theme='dark'] :is(.bg-teal-50, .bg-teal-100) {
+  background-color: #203637;
+}
+
+:root[data-theme='dark'] :is(.text-green-600, .text-green-700, .text-green-800) {
+  color: #8CDCAC;
+}
+
+:root[data-theme='dark'] :is(.text-red-600, .text-red-700, .text-red-800) {
+  color: #FFAAAA;
+}
+
+:root[data-theme='dark'] :is(.text-yellow-600, .text-yellow-700, .text-yellow-800, .text-amber-700, .text-amber-800, .text-amber-900) {
+  color: #FFC734;
+}
+
+:root[data-theme='dark'] :is(.text-purple-600, .text-purple-700, .text-purple-900, .text-pink-600, .text-pink-700, .text-indigo-600, .text-indigo-700) {
+  color: #D9B9EE;
+}
+
+:root[data-theme='dark'] :is(.text-orange-600, .text-orange-700) {
+  color: #FBC29A;
+}
+
+:root[data-theme='dark'] :is(.text-teal-600, .text-teal-700) {
+  color: #91E0D4;
+}
 
 /* ========================================================================== */
 /* TYPOGRAFIA IMPORTSBR · manual v1.0 · sem alterar estrutura ou layout         */
 /* ========================================================================== */
 
 /* As fontes oficiais disponibilizam estes pesos: Archivo até 600; Jost até 500. */
-.font-bold, .font-extrabold, .font-black, b, strong, th { font-weight: 600; }
-.font-mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.font-bold,
+.font-extrabold,
+.font-black,
+b,
+strong,
+th {
+  font-weight: 600;
+}
+
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Hierarquia tipográfica Jost. Mantemos os tamanhos de cada tela existentes. */
-h1, h1[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 300; letter-spacing: -0.015em; }
-h2, h2[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 400; letter-spacing: -0.015em; }
-h3, h3[class], h4, h4[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 400; letter-spacing: -0.015em; }
-h5, h5[class], h6, h6[class] { font-family: 'Jost', 'Archivo', sans-serif; font-weight: 500; letter-spacing: -0.015em; }
+h1,
+h1[class] {
+  font-family: 'Jost', 'Archivo', sans-serif;
+  font-weight: 300;
+  letter-spacing: -0.015em;
+}
+
+h2,
+h2[class] {
+  font-family: 'Jost', 'Archivo', sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+h3,
+h3[class],
+h4,
+h4[class] {
+  font-family: 'Jost', 'Archivo', sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+h5,
+h5[class],
+h6,
+h6[class] {
+  font-family: 'Jost', 'Archivo', sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}

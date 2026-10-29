@@ -12,7 +12,9 @@ test('Master e o unico com privilegios de criar outros Masters e editar cargos',
   for(const key of RESERVED) assert.equal(roleDef.permissions.includes(key),roleDef.slug==='master');
  }
  assert.deepEqual(role('master').permissions,ALL_KEYS);
- assert.deepEqual(role('administrador').permissions,NORMAL_KEYS);
+ assert.deepEqual(role('administrador').permissions,NORMAL_KEYS.filter(p=>p!=='page.monitoring'));
+ assert.equal(role('master').permissions.includes('page.monitoring'),true);
+ for (const item of SYSTEM_ROLES.filter(r=>r.slug!=='master')) assert.equal(item.permissions.includes('page.monitoring'), false);
 });
 test('Supervisor so ve relatorios e area tecnica; Tecnico so relatorio tecnico',()=>{
  assert.deepEqual(role('supervisor').permissions,['page.reports','page.technicalOdd','page.technicalReport']);

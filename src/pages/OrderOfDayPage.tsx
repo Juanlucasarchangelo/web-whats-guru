@@ -28,6 +28,8 @@ async function sharePdf(blob: Blob, name: string): Promise<'done' | 'cancelled' 
 type Generated = { blob: Blob; url: string; name: string };
 export function OrderOfDayPage({ embedded = false }: { embedded?: boolean }) {
   const [coordenador, setCoordenador] = useState('');
+  const [numeroProposta, setNumeroProposta] = useState('');
+  const requestId = useRef(newDocumentRequestId());
   const [data, setData] = useState(today);
   const [cliente, setCliente] = useState('');
   const [endereco, setEndereco] = useState('');
@@ -39,22 +41,23 @@ export function OrderOfDayPage({ embedded = false }: { embedded?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; message: string } | null>(null);
   useEffect(() => () => { if (generatedRef.current) URL.revokeObjectURL(generatedRef.current.url); }, []);
-  function invalidate() { if (generatedRef.current) { URL.revokeObjectURL(generatedRef.current.url); generatedRef.current = null; setGenerated(null); } }
-  function create() {
+  function invalidate() { requestId.current = newDocumentRequestId(); if (generatedRef.current) { URL.revokeObjectURL(generatedRef.current.url); generatedRef.current = null; setGenerated(null); } }
+  async function create() {
     if (!coordenador.trim() || !cliente.trim() || !data || !endereco.trim()) {
       setNotice({ ok: false, message: 'Preencha coordenador, data, cliente e endereço antes de gerar o PDF.' }); return;
     }
     setBusy(true); setNotice(null); invalidate();
     try {
       const values: OddData = {
-        coordenador: coordenador.trim(), data, cliente: cliente.trim(), endereco: endereco.trim(),
+        coordenador: coordenador.trim(), numeroProposta: numeroProposta.trim(), data, cliente: cliente.trim(), endereco: endereco.trim(),
         tecnicos: tecnicos.map(t => ({ nome: t.nome.trim(), funcao: t.funcao.trim() })).filter(t => t.nome || t.funcao),
         objetivos: objetivos.map(o => o.trim()).filter(Boolean), observacoes: observacoes.trim()
       };
+      const saved = await saveTechnicalDocument('odd', values, requestId.current, !embedded);
       const blob = generateOddPdf(values);
       const next = { blob, url: URL.createObjectURL(blob), name: `${dateFilename(data)} - ${cleanFilename(cliente)} - ODD.pdf` };
       generatedRef.current = next; setGenerated(next);
-      setNotice({ ok: true, message: 'PDF gerado. Você pode baixá-lo ou compartilhá-lo sem sair desta tela.' });
+      setNotice({ ok: true, message: `ODD ${String(saved.document_number).padStart(3, '0')} salva no Monitoramento. PDF disponível para baixar ou compartilhar.` });
     } catch (e) { setNotice({ ok: false, message: e instanceof Error ? e.message : 'Não foi possível gerar o PDF.' }); }
     finally { setBusy(false); }
   }
@@ -77,6 +80,7 @@ export function OrderOfDayPage({ embedded = false }: { embedded?: boolean }) {
         <div><label className={labelClass} htmlFor="odd-coordenador">Coordenador técnico *</label><input id="odd-coordenador" className={inputClass} maxLength={120} placeholder="Nome completo" value={coordenador} onChange={e => { invalidate(); setCoordenador(e.target.value); }} /></div>
         <div><label className={labelClass} htmlFor="odd-data">Data *</label><input id="odd-data" type="date" className={inputClass} value={data} onChange={e => { invalidate(); setData(e.target.value); }} /></div>
         <div><label className={labelClass} htmlFor="odd-cliente">Cliente *</label><input id="odd-cliente" className={inputClass} maxLength={120} placeholder="Nome do cliente" value={cliente} onChange={e => { invalidate(); setCliente(e.target.value); }} /></div>
+        <div><label className={labelClass} htmlFor="odd-proposta">Número de proposta (opcional)</label><input id="odd-proposta" className={inputClass} maxLength={120} placeholder="Ex.: PROP-2026-001" value={numeroProposta} onChange={e => { invalidate(); setNumeroProposta(e.target.value); }} /></div>
         <div><label className={labelClass} htmlFor="odd-endereco">Endereço da obra *</label><input id="odd-endereco" className={inputClass} maxLength={500} placeholder="Rua, número, cidade, ponto de referência" value={endereco} onChange={e => { invalidate(); setEndereco(e.target.value); }} /></div>
       </div></Section>
       <Section number={2} title="Técnicos em visita"><div className="space-y-3">{tecnicos.map((tech, i) => <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Camera, CheckCircle2, ClipboardList, Download, FileDown, Images, Loader2, Plus, Share2, Trash2, Wrench } from 'lucide-react';
 import { generateTechnicalPdf, type ReportPhoto, type ReportStatus } from '@/lib/technicalReportPdf';
+import { newDocumentRequestId, saveTechnicalDocument } from '@/lib/technicalDocuments';
 
 const operations = ['São Paulo', 'Rio de Janeiro', 'Brasília', 'Curitiba'];
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -60,6 +61,8 @@ async function prepareImage(file: File): Promise<Omit<Photo, 'id'>> {
 }
 export function TechnicalReportPage({ embedded = false }: { embedded?: boolean }) {
   const [cliente, setCliente] = useState('');
+  const [numeroOdd, setNumeroOdd] = useState('');
+  const requestId = useRef(newDocumentRequestId());
   const [data, setData] = useState(today);
   const [operacao, setOperacao] = useState('');
   const [endereco, setEndereco] = useState('');
@@ -83,7 +86,7 @@ export function TechnicalReportPage({ embedded = false }: { embedded?: boolean }
   }
   const addPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
-    setNotice(null); clearPrevious(); setWorking(true);
+    setNotice(null); requestId.current = newDocumentRequestId(); clearPrevious(); setWorking(true);
     const added: Photo[] = [];
     try {
       for (const file of Array.from(files).slice(0, Math.max(0, 10 - fotos.length))) {
@@ -94,16 +97,17 @@ export function TechnicalReportPage({ embedded = false }: { embedded?: boolean }
       setFotos(prev => [...prev, ...added].slice(0, 10));
     } finally { setWorking(false); if (fileInput.current) fileInput.current.value = ''; if (cameraInput.current) cameraInput.current.value = ''; }
   };
-  function createPdfs() {
+  async function createPdfs() {
     if (!cliente.trim() || !data || !servico.trim()) {
       setNotice({ ok: false, text: 'Preencha cliente, data e descrição do serviço antes de exportar.' }); return;
     }
     setWorking(true); clearPrevious(); setNotice(null);
     try {
       const values = {
-        cliente: cliente.trim(), data, operacao, endereco, tecnicos: tecnicos.map(x => x.trim()).filter(Boolean), status,
+        cliente: cliente.trim(), numeroOdd: numeroOdd.trim(), data, operacao, endereco, tecnicos: tecnicos.map(x => x.trim()).filter(Boolean), status,
         servico: servico.trim(), pendencias: pendencias.map(x => x.trim()).filter(Boolean), observacoes, fotos: fotos.map(({ dataUrl, name, width, height }) => ({ dataUrl, name, width, height }))
       };
+      const saved = await saveTechnicalDocument('technical_report', values, requestId.current, !embedded);
       const reportBlob = generateTechnicalPdf(values, true);
       const pendingBlob = generateTechnicalPdf(values, false);
       const [year, month, day] = data.split('-');
@@ -114,11 +118,11 @@ export function TechnicalReportPage({ embedded = false }: { embedded?: boolean }
         reportName: `${dateLabel} - ${clienteLabel} - Relatório técnico completo.pdf`, pendingName: `${dateLabel} - ${clienteLabel} - Relatório técnico sem pendências.pdf`, reportBlob, pendingBlob
       };
       downloadsRef.current = next; setDownloads(next);
-      setNotice({ ok: true, text: 'Os dois PDFs estão prontos. Você pode compartilhar ou baixar cada um sem sair do formulário.' });
+      setNotice({ ok: true, text: `Relatório ${String(saved.document_number).padStart(3, '0')} salvo no Monitoramento. Os dois PDFs estão prontos para baixar ou compartilhar.` });
     } catch (error) { setNotice({ ok: false, text: error instanceof Error ? error.message : 'Não foi possível gerar os PDFs.' }); }
     finally { setWorking(false); }
   }
-  const dirty = () => { if (downloadsRef.current) clearPrevious(); };
+  const dirty = () => { requestId.current = newDocumentRequestId(); if (downloadsRef.current) clearPrevious(); };
   async function handleShare(kind: 'report' | 'pending') {
     const current = downloadsRef.current;
     if (!current) return;
@@ -138,12 +142,13 @@ export function TechnicalReportPage({ embedded = false }: { embedded?: boolean }
     <main className="mx-auto max-w-4xl space-y-5 px-4 py-8 sm:px-6">
       <div className="mb-6"><div className="flex items-center gap-2 text-amber-700"><ClipboardList size={20} /><span className="text-sm font-bold uppercase tracking-wider">Documento de campo</span></div>
         <h1 className="mt-1 text-3xl font-extrabold tracking-tight">Relatório Técnico</h1>
-        <p className="mt-1 text-sm text-slate-600">Preencha a visita e gere dois PDFs: um relatório técnico completo (incluindo pendências) e outro com todas as informações, exceto as pendências. Nada é enviado ao servidor.</p>
+        <p className="mt-1 text-sm text-slate-600">Preencha a visita e gere dois PDFs: um relatório técnico completo (incluindo pendências) e outro com todas as informações, exceto as pendências. Os dados do formulário são registrados para monitoramento.</p>
       </div>
       <Section number={1} title="Identificação"><div className="grid gap-4 sm:grid-cols-2">
         <div><label className={labelClass}>Cliente *</label><input className={inputClass} value={cliente} maxLength={120} onChange={e => { dirty(); setCliente(e.target.value); }} placeholder="Nome do cliente" /></div>
         <div><label className={labelClass}>Data *</label><input type="date" className={inputClass} value={data} onChange={e => { dirty(); setData(e.target.value); }} /></div>
         <div><label className={labelClass}>Operação</label><select className={inputClass} value={operacao} onChange={e => { dirty(); setOperacao(e.target.value); }}><option value="">Selecione</option>{operations.map(x => <option key={x}>{x}</option>)}</select></div>
+        <div><label className={labelClass}>Número ODD (opcional)</label><input className={inputClass} maxLength={120} value={numeroOdd} onChange={e => { dirty(); setNumeroOdd(e.target.value); }} placeholder="Ex.: 001" /></div>
         <div><label className={labelClass}>Endereço</label><input className={inputClass} value={endereco} onChange={e => { dirty(); setEndereco(e.target.value); }} placeholder="Endereço completo" /></div>
       </div></Section>
       <Section number={2} title="Técnicos em campo"><div className="space-y-3">{tecnicos.map((nome, i) => <div key={i} className="flex gap-2"><input className={inputClass} value={nome} onChange={e => { dirty(); setTecnicos(prev => prev.map((x, j) => i === j ? e.target.value : x)); }} placeholder="Nome do técnico" /><button type="button" aria-label="Remover técnico" className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => { dirty(); setTecnicos(prev => prev.length === 1 ? [''] : prev.filter((_, j) => j !== i)); }}><Trash2 size={19} /></button></div>)}</div>

@@ -6,18 +6,15 @@ import {
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
   LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
 } from 'lucide-react';
-
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
   | 'automations' | 'campaigns' | 'schedules' | 'reports'
   | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport' | 'monitoring';
-
 interface AppShellProps {
   currentPage: PageId;
   onNavigate: (page: PageId) => void;
   children: ReactNode;
 }
-
 const navItems: { id: PageId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
   { id: 'inbox', label: 'Caixa de Entrada', icon: Inbox },
@@ -31,42 +28,35 @@ const navItems: { id: PageId; label: string; icon: typeof LayoutDashboard }[] = 
   { id: 'team', label: 'Equipe & Permissões', icon: UsersRound },
   { id: 'settings', label: 'Integrações', icon: Settings },
 ];
-
 export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
   const { user, profile, signOut } = useAuth();
   const { currentOrg, currentMembership, organizations, switchOrganization, can, roleName } = useOrg();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [areaTecnicaOpen,setAreaTecnicaOpen] = useState(false);
+  const [areaTecnicaOpen, setAreaTecnicaOpen] = useState(false);
   // Preferência local da interface: tema escuro por padrão.
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   );
-
   function toggleTheme() {
     const next = theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem('whats-guru-theme', next); } catch { /* armazenamento indisponível */ }
     setTheme(next);
   }
-
-
   function handleNavigate(page: PageId) {
     onNavigate(page);
     setSidebarOpen(false);
   }
-
   function handleSignOut() {
     signOut();
   }
-
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
-
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-40
@@ -86,7 +76,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <X size={20} />
           </button>
         </div>
-
         {/* Company identity */}
         <div className="px-3 py-3 border-b border-slate-100">
           <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5">
@@ -102,10 +91,9 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>}
         </div>
-
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-          {navItems.filter(item=>can(`page.${item.id}`)).map((item) => {
+          {navItems.filter(item => can(`page.${item.id}`)).map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
             return (
@@ -120,30 +108,33 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             );
           })}
           {/* Área técnica: itens filtrados por permissões efetivas. */}
-          {(can('page.technicalOdd') || can('page.technicalReport')) && <button
+          {(can('page.technicalOdd') || can('page.technicalReport') || can('page.monitoring')) && <button
             type="button"
             onClick={() => setAreaTecnicaOpen(open => !open)}
             aria-expanded={areaTecnicaOpen}
             className={`sidebar-item w-full ${(currentPage === 'technicalOdd' || currentPage === 'technicalReport' || currentPage === 'monitoring') ? 'sidebar-item-active' : ''}`}
           >
-            <Wrench size={18}/>
+            <Wrench size={18} />
             <span className="flex-1 text-left">Área técnica</span>
-            <ChevronDown size={16} className={`transition-transform ${areaTecnicaOpen ? 'rotate-180' : ''}`}/>
+            <ChevronDown size={16} className={`transition-transform ${areaTecnicaOpen ? 'rotate-180' : ''}`} />
           </button>}
-          {areaTecnicaOpen && (can('page.technicalOdd') || can('page.technicalReport')) && (
+          {areaTecnicaOpen && (can('page.technicalOdd') || can('page.technicalReport') || can('page.monitoring')) && (
             <div className="ml-5 border-l border-slate-200 pl-2 space-y-0.5">
               {can('page.technicalOdd') && <button type="button" onClick={() => handleNavigate('technicalOdd')}
-                className={`sidebar-item w-full ${currentPage === 'technicalOdd'?'sidebar-item-active':''}`}>
-                <ClipboardList size={16}/><span className="flex-1 text-left">ODD</span>
+                className={`sidebar-item w-full ${currentPage === 'technicalOdd' ? 'sidebar-item-active' : ''}`}>
+                <ClipboardList size={16} /><span className="flex-1 text-left">ODD</span>
               </button>}
               {can('page.technicalReport') && <button type="button" onClick={() => handleNavigate('technicalReport')}
-                className={`sidebar-item w-full ${currentPage === 'technicalReport'?'sidebar-item-active':''}`}>
-                <FileText size={16}/><span className="flex-1 text-left">Relatório técnico</span>
+                className={`sidebar-item w-full ${currentPage === 'technicalReport' ? 'sidebar-item-active' : ''}`}>
+                <FileText size={16} /><span className="flex-1 text-left">Relatório técnico</span>
+              </button>}
+              {can('page.monitoring') && <button type="button" onClick={() => handleNavigate('monitoring')}
+                className={`sidebar-item w-full ${currentPage === 'monitoring' ? 'sidebar-item-active' : ''}`}>
+                <ClipboardList size={16} /><span className="flex-1 text-left">Monitoramento</span>
               </button>}
             </div>
           )}
         </nav>
-
         {/* User section */}
         <div className="border-t border-slate-100 p-3 relative">
           <button
@@ -160,7 +151,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
               <p className="text-xs text-slate-400 truncate">{user?.email}</p>
             </div>
           </button>
-
           {userMenuOpen && (
             <div className="absolute left-3 right-3 bottom-full mb-1 rounded-lg bg-white shadow-lg ring-1 ring-slate-200 py-1 z-10">
               {can('page.profile') && <button
@@ -187,7 +177,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           )}
         </div>
       </aside>
-
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile header */}
@@ -203,7 +192,6 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           </div>
           <div className="w-8" />
         </header>
-
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>
