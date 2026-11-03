@@ -21,6 +21,37 @@ const finiteCoordinate = (value, min, max) => {
   const n = Number(value);
   return value !== null && value !== undefined && value !== '' && Number.isFinite(n) && n >= min && n <= max ? n : null;
 };
+// Quando a Evolution envia application/octet-stream ou omite MIME,
+// identifica o formato pela extensão sem alterar o conteúdo original.
+const extensionMime = {
+  pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv',
+  json: 'application/json', xml: 'application/xml', rtf: 'application/rtf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  zip: 'application/zip', rar: 'application/vnd.rar',
+  '7z': 'application/x-7z-compressed', gz: 'application/gzip',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', ogg: 'audio/ogg',
+  mp4: 'video/mp4', mov: 'video/quicktime',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  webp: 'image/webp', gif: 'image/gif', heic: 'image/heic',
+};
+
+export function normalizeMediaMime(mime, name, type = 'document') {
+  const normalized = typeof mime === 'string' ? mime.split(';')[0].trim().toLowerCase() : '';
+  const extension = String(name || '').split(/[\\/]/).pop()?.match(/\.([a-z0-9]{1,12})$/i)?.[1]?.toLowerCase();
+  if (type === 'document' && (!normalized || normalized === 'application/octet-stream' || normalized === 'binary/octet-stream')) {
+    return extensionMime[extension] || 'application/octet-stream';
+  }
+  return normalized || (type === 'document' ? 'application/octet-stream' : '');
+}
+
 export function identifyEvolutionMedia(item) {
   const message = unwrapMessage(item);
   const found = supported.find(([, key]) => message?.[key] && typeof message[key] === 'object');
@@ -40,9 +71,8 @@ export function identifyEvolutionMedia(item) {
       caption: ''
     };
   }
-  let mime = typeof media.mimetype === 'string' ? media.mimetype.split(';')[0].trim().toLowerCase().slice(0, 191) : null;
   const name = typeof media.fileName === 'string' ? media.fileName.slice(0, 255) : null;
-  if (type === 'document' && /\.pdf$/i.test(name || '') && (!mime || mime === 'application/octet-stream')) mime = 'application/pdf';
+  const mime = normalizeMediaMime(media.mimetype, name, type).slice(0, 191) || null;
   const rawSize = media.fileLength;
   const size = Number(rawSize?.low ?? rawSize);
   // Mantem os metadados originais necessarios para descriptografar o arquivo na Evolution.

@@ -64,6 +64,12 @@ export async function apiBlob(path: string): Promise<Blob> {
   const org = getSelectedOrg();
   if (org) headers.set('x-org-id', org);
   const response = await fetch(`${API_BASE}/api${path}`, { headers });
-  if (!response.ok) throw new ApiError(response.status, `Midia indisponivel (HTTP ${response.status}).`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(
+      response.status,
+      typeof body?.error === 'string' ? body.error : `Não foi possível baixar a mídia (HTTP ${response.status}).`
+    );
+  }
   return response.blob();
 }

@@ -468,9 +468,9 @@ export function InboxPage() {
   };
   const contact = selectedConv ? contactsMap[selectedConv.contact_id] : null;
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 min-w-0 w-full overflow-hidden">
       {/* Conversations list */}
-      <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col">
+      <div className="w-full md:w-80 lg:w-96 md:shrink-0 min-w-0 min-h-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
         {/* Search & filters */}
         <div className="p-4 border-b border-slate-100 space-y-3">
           <button type="button" className="btn-primary w-full justify-center" onClick={openNewConversation}><Plus size={16}/> Nova conversa</button>
@@ -543,7 +543,7 @@ export function InboxPage() {
           </div>
         </div>
         {/* Conversation list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
           {loading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : conversations.length === 0 ? (
@@ -590,16 +590,16 @@ export function InboxPage() {
       </div>
       {/* Chat area */}
       {selectedConv ? (
-        <div className="flex-1 flex flex-col bg-slate-50">
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-slate-50 overflow-hidden">
           {/* Chat header */}
-          <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between min-w-0 gap-2">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 flex-shrink-0">
                 {(contact?.name ?? '?').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <p className="font-medium text-slate-900 truncate">{contact?.name ?? 'Desconhecido'}</p>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex flex-wrap items-center gap-2 mt-0.5 min-w-0">
                   <span className={`badge ${
                     selectedConv.status === 'open' ? 'badge-green' :
                     selectedConv.status === 'pending' ? 'badge-yellow' : 'badge-gray'
@@ -618,7 +618,7 @@ export function InboxPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'evolution_api' && (
                 <button type="button" className="btn-ghost px-2 py-1.5" disabled={syncing}
                   onClick={() => void syncFromEvolution(selectedConv.id, true)}
@@ -652,7 +652,7 @@ export function InboxPage() {
             </div>
           )}
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-3">
             {loadingMessages ? (
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : messages.length === 0 ? (
@@ -661,8 +661,8 @@ export function InboxPage() {
               messages.map((msg) => {
                 const isAgent = msg.sender_type === 'agent' || msg.sender_type === 'bot';
                 return (
-                  <div key={msg.id} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                  <div key={msg.id} className={`flex min-w-0 w-full ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[75%] min-w-0 rounded-2xl px-4 py-2.5 ${
                       isAgent
                         ? msg.is_bot ? 'bg-purple-100 text-purple-900' : 'bg-blue-600 text-brand-on-accent'
                         : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-100'
@@ -674,7 +674,7 @@ export function InboxPage() {
                       )}
                       <MessageMedia message={msg} />
                       {msg.body && !(msg.media_type && /^\[(Imagem|Vídeo|Áudio|Documento|Figurinha|Localização)\]$/.test(msg.body)) && (
-                        <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className="text-sm whitespace-pre-wrap break-words" style={{ overflowWrap: 'anywhere' }}>{msg.body}</p>
                       )}
                       <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? (msg.is_bot ? 'text-purple-500' : 'text-blue-200') : 'text-slate-400'}`}>
                         {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -693,7 +693,7 @@ export function InboxPage() {
           </div>
           {/* Message input */}
           {selectedConv.status !== 'closed' && (
-            <div className="bg-white border-t border-slate-200 p-3">
+            <div className="bg-white border-t border-slate-200 p-3 min-w-0 shrink-0">
               {showQuickReplies && (
                 <div className="mb-2 rounded-lg border border-slate-200 shadow-sm max-h-48 overflow-y-auto">
                   <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
@@ -724,7 +724,7 @@ export function InboxPage() {
                 {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'meta' && <button type="button" className="btn-ghost text-xs" onClick={sendApprovedTemplate}>Enviar template aprovado</button>}
                 <button type="button" className="btn-ghost text-xs" disabled={suggestingAI} onClick={suggestWithAI}><Bot size={14} className="inline mr-1"/>{suggestingAI?'Gerando…':'Sugerir resposta com IA'}</button>
               </div>
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-2 min-w-0">
                 <button
                   onClick={() => setShowQuickReplies(!showQuickReplies)}
                   className="btn-ghost px-2 py-2"
@@ -746,7 +746,7 @@ export function InboxPage() {
                   }}
                   placeholder="Digite sua mensagem..."
                   rows={1}
-                  className="flex-1 resize-none rounded-lg border-0 py-2.5 px-3.5 text-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-blue-600 max-h-32"
+                  className="flex-1 min-w-0 resize-none rounded-lg border-0 py-2.5 px-3.5 text-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-blue-600 max-h-32"
                 />
                 <button
                   onClick={handleSendMessage}

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { sendTextToWhatsApp } from '../services/whatsapp.js';
-import { publicLocation } from '../services/evolution-media.js';
+import { publicLocation, normalizeMediaMime } from '../services/evolution-media.js';
 
 import {
   loadEvolution,
@@ -57,64 +57,38 @@ const editConversation = z.object({
   ]),
 }).strict();
 
+// Documentos recebidos via WhatsApp incluem muitos formatos além de PDF/Office.
+// Não interpretar documentos como HTML executável: o endpoint os serve como anexos.
 const allowedMedia = {
-  image: [
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'image/gif',
-  ],
-  sticker: [
-    'image/webp',
-    'image/png',
-  ],
-  audio: [
-    'audio/ogg',
-    'audio/mpeg',
-    'audio/mp4',
-    'audio/aac',
-    'audio/wav',
-    'audio/webm',
-  ],
-  video: [
-    'video/mp4',
-    'video/webm',
-    'video/quicktime',
-  ],
-  document: [
-    'application/pdf',
-    'text/plain',
-    'application/zip',
-    'application/octet-stream',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ],
+  image: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']),
+  sticker: new Set(['image/webp', 'image/png']),
+  audio: new Set(['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/webm', 'audio/opus', 'audio/x-m4a', 'audio/amr', 'audio/3gpp']),
+  video: new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/3gpp', 'video/x-matroska']),
 };
 
 const mediaExtensions = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/webp': '.webp',
-  'image/gif': '.gif',
-  'video/mp4': '.mp4',
-  'video/webm': '.webm',
-  'video/quicktime': '.mov',
-  'audio/ogg': '.ogg',
-  'audio/mpeg': '.mp3',
-  'audio/mp4': '.m4a',
-  'audio/aac': '.aac',
-  'audio/wav': '.wav',
-  'audio/webm': '.webm',
-  'application/pdf': '.pdf',
-  'text/plain': '.txt',
-  'application/zip': '.zip',
-  'application/msword': '.doc',
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+  'image/heic': '.heic', 'image/heif': '.heif',
+  'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+  'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+  'audio/aac': '.aac', 'audio/wav': '.wav', 'audio/webm': '.webm',
+  'application/pdf': '.pdf', 'text/plain': '.txt', 'application/json': '.json',
+  'application/zip': '.zip', 'application/msword': '.doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
   'application/vnd.ms-excel': '.xls',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
 };
+
+// Arquivos são aceitos apenas quando a mensagem foi classificada pelo WhatsApp
+// como documentMessage, nunca como um caminho arbitrário fornecido pelo usuário.
+function isAllowedMedia(type, mime) {
+  if (type === 'document') {
+    return /^(application|text|image|audio|video)\/[a-z0-9][a-z0-9.+_-]*$/.test(mime);
+  }
+  return Boolean(allowedMedia[type]?.has(mime));
+}
 
 function mediaFilename(message, mime) {
   const original = path.basename(
@@ -518,9 +492,9 @@ export function conversationsRouter() {
         throw new HttpError(404, 'Mensagem sem midia.');
       }
 
-      const mime = (msg.media_mime || '').toLowerCase();
+      const mime = normalizeMediaMime(msg.media_mime, msg.media_name, msg.media_type);
 
-      if (!allowedMedia[msg.media_type]?.includes(mime)) {
+      if (!isAllowedMedia(msg.media_type, mime)) {
         throw new HttpError(
           415,
           'Formato de midia nao permitido para visualizacao.'
@@ -535,10 +509,9 @@ export function conversationsRouter() {
       });
 
       res.set('Content-Type', mime);
-      res.set(
-        'Content-Disposition',
-        `inline; filename="${msg.id}"`
-      );
+      // Documentos devem ser baixados, e não executados/renderizados pelo browser.
+      res.set('Content-Disposition',
+        `${msg.media_type === 'document' ? 'attachment' : 'inline'}; filename="${msg.id}"`);
       res.set('Cache-Control', 'private, no-store');
       res.set('X-Content-Type-Options', 'nosniff');
 

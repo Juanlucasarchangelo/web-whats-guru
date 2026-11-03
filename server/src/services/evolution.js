@@ -161,19 +161,44 @@ export async function syncEvolutionConversation({ orgId, conversation }) {
   return { counts, scanned: items.length, fallback_used, synchronized_at: new Date().toISOString() };
 }
 
-/** Media preview: temporary retrieval from Evolution. No media bytes saved on our servers yet. */
+/** Download autenticado da mídia pela Evolution API. */
 export async function fetchEvolutionMedia({ orgId, integrationId, mediaMessage }) {
   const api = await loadEvolution(orgId, integrationId);
-  if (!api) throw new HttpError(503, 'Evolution indisponivel para esta conversa.');
-  if (!mediaMessage?.key?.id || !mediaMessage?.message) throw new HttpError(409, 'Midia sem metadados suficientes para recuperacao.');
-  const result = await evolutionGet(api, `/chat/getBase64FromMediaMessage/${encodeURIComponent(api.instance)}`, 'POST', {
-    message: mediaMessage, convertToMp4: false,
-  });
-  const raw = result?.base64 ?? result?.data?.base64 ?? result?.response?.base64;
-  if (typeof raw !== 'string') throw new HttpError(502, 'Evolution nao devolveu o conteudo da midia.');
-  const base64 = raw.replace(/^data:[^,]+,/, '');
-  if (base64.length > 56_000_000 || !/^[a-zA-Z0-9+/=]+$/.test(base64)) throw new HttpError(413, 'Midia muito grande ou invalida para visualizacao temporaria.');
-  const bytes = Buffer.from(base64, 'base64');
-  if (bytes.length > 40 * 1024 * 1024) throw new HttpError(413, 'Midia acima de 40 MB. Aguarde integracao com QNAP.');
-  return bytes;
+  if (!api) throw new HttpError(503, 'Evolution indisponível para esta conversa.');
+  if (!mediaMessage?.key?.id) throw new HttpError(409, 'Mensagem sem identificador para recuperar a mídia.');
+
+  const endpoint = `/chat/getBase64FromMediaMessage/${encodeURIComponent(api.instance)}`;
+  // Compatibilidade entre versões: algumas exigem o objeto completo recebido
+  // no webhook; outras aceitam somente a chave da mensagem.
+  const attempts = mediaMessage?.message
+    ? [mediaMessage, { key: mediaMessage.key }]
+    : [{ key: mediaMessage.key }];
+  let lastError;
+  for (const payload of attempts) {
+    try {
+      const result = await evolutionGet(api, endpoint, 'POST', {
+        message: payload, convertToMp4: false,
+      });
+      const raw = result?.base64 ?? result?.data?.base64 ??
+        result?.response?.base64 ?? result?.data?.data?.base64;
+      if (typeof raw !== 'string' || !raw.length) {
+        throw new HttpError(502, 'Evolution não disponibilizou os dados deste arquivo.');
+      }
+      const base64 = raw.replace(/^data:[^,]+,/, '').replace(/\s/g, '');
+      if (base64.length > 56_000_000 || !/^[a-zA-Z0-9+/]*={0,2}$/.test(base64)) {
+        throw new HttpError(413, 'Arquivo excede o limite de transferência (40 MB) ou contém dados inválidos.');
+      }
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length > 40 * 1024 * 1024) {
+        throw new HttpError(413, 'Arquivo excede o limite de transferência de 40 MB.');
+      }
+      if (bytes.length === 0) throw new HttpError(502, 'Evolution devolveu um arquivo vazio.');
+      return bytes;
+    } catch (error) {
+      lastError = error;
+      // Tenta formato alternativo apenas para falhas na disponibilidade da mídia.
+      if (payload === attempts[attempts.length - 1] || error?.status === 413 || error?.status === 503) break;
+    }
+  }
+  throw lastError || new HttpError(502, 'Não foi possível recuperar a mídia pela Evolution.');
 }
