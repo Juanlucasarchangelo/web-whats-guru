@@ -4,11 +4,11 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText,
+  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText, Instagram,
 } from 'lucide-react';
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
-  | 'automations' | 'campaigns' | 'schedules' | 'reports'
+  | 'automations' | 'instagramCrm' | 'campaigns' | 'schedules' | 'reports'
   | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport' | 'monitoring';
 interface AppShellProps {
   currentPage: PageId;
@@ -21,7 +21,6 @@ const navItems: { id: PageId; label: string; icon: typeof LayoutDashboard }[] = 
   { id: 'contacts', label: 'Contatos', icon: Users },
   { id: 'crm', label: 'CRM Kanban', icon: Kanban },
   { id: 'chatbots', label: 'Chatbots', icon: Bot },
-  { id: 'automations', label: 'Automações', icon: Zap },
   { id: 'campaigns', label: 'Campanhas', icon: Megaphone },
   { id: 'schedules', label: 'Agendamentos', icon: CalendarClock },
   { id: 'reports', label: 'Relatórios', icon: BarChart3 },
@@ -34,6 +33,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [areaTecnicaOpen, setAreaTecnicaOpen] = useState(false);
+  const [automacoesOpen, setAutomacoesOpen] = useState(() => currentPage === 'automations' || currentPage === 'instagramCrm');
   // Preferência local da interface: tema escuro por padrão.
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
@@ -107,6 +107,26 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
               </button>
             );
           })}
+          {/* Mantém a página original como primeiro item do submenu. */}
+          {(can('page.automations') || can('page.instagramCrm')) && <button
+            type="button"
+            onClick={() => setAutomacoesOpen(open => !open)}
+            aria-expanded={automacoesOpen}
+            className={`sidebar-item w-full ${(currentPage === 'automations' || currentPage === 'instagramCrm') ? 'sidebar-item-active' : ''}`}
+          >
+            <Zap size={18}/><span className="flex-1 text-left">Automações</span>
+            <ChevronDown size={16} className={`transition-transform ${automacoesOpen ? 'rotate-180' : ''}`}/>
+          </button>}
+          {automacoesOpen && (can('page.automations') || can('page.instagramCrm')) && <div className="ml-5 space-y-0.5 border-l border-slate-200 pl-2">
+            {can('page.automations') && <button type="button" onClick={() => handleNavigate('automations')}
+              className={`sidebar-item w-full ${currentPage === 'automations' ? 'sidebar-item-active' : ''}`}>
+              <Zap size={16}/><span className="flex-1 text-left">Automações existentes</span>
+            </button>}
+            {can('page.instagramCrm') && <button type="button" onClick={() => handleNavigate('instagramCrm')}
+              className={`sidebar-item w-full ${currentPage === 'instagramCrm' ? 'sidebar-item-active' : ''}`}>
+              <Instagram size={16}/><span className="flex-1 text-left">Stalker</span>
+            </button>}
+          </div>}
           {/* Área técnica: itens filtrados por permissões efetivas. */}
           {(can('page.technicalOdd') || can('page.technicalReport') || can('page.monitoring')) && <button
             type="button"

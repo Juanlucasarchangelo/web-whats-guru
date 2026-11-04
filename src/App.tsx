@@ -10,6 +10,7 @@ import { InboxPage } from '@/pages/InboxPage';
 import { CrmPage } from '@/pages/CrmPage';
 import { ChatbotsPage } from '@/pages/ChatbotsPage';
 import { AutomationsPage } from '@/pages/AutomationsPage';
+import { InstagramCrmPage } from '@/pages/InstagramCrmPage';
 import { CampaignsPage } from '@/pages/CampaignsPage';
 import { SchedulesPage } from '@/pages/SchedulesPage';
 import { ReportsPage } from '@/pages/ReportsPage';
@@ -28,7 +29,7 @@ function AppContent() {
     const path = window.location.pathname.replace(/\/$/, '');
     return path === '/ordem-do-dia' || path === '/odd' ? 'technicalOdd' : path === '/relatorio-tecnico' ? 'technicalReport' : 'dashboard';
   });
-  const ordered: PageId[] = ['dashboard','inbox','contacts','crm','chatbots','automations','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];
+  const ordered: PageId[] = ['dashboard','inbox','contacts','crm','chatbots','automations','instagramCrm','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];
   const firstAllowed = ordered.find(page => permissions.includes(`page.${page}`));
   useEffect(() => {
     if (!orgLoading && firstAllowed && !permissions.includes(`page.${currentPage}`)) setCurrentPage(firstAllowed);
@@ -50,6 +51,7 @@ function AppContent() {
         crm: <CrmPage />,
         chatbots: <ChatbotsPage />,
         automations: <AutomationsPage />,
+        instagramCrm: <InstagramCrmPage />,
         campaigns: <CampaignsPage />,
         schedules: <SchedulesPage />,
         reports: <ReportsPage />,
