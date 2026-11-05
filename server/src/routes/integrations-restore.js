@@ -19,7 +19,11 @@ export function encrypt(value) {
   const ciphertext=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);
   return `enc:${Buffer.concat([iv,cipher.getAuthTag(),ciphertext]).toString('base64')}`;
 }
-function checkAdmin(req) {if(!admin(req))throw new HttpError(403,'Somente Master ou DEV pode gerenciar a integracao compartilhada.');}
+function checkAdmin(req) {if(!admin(req))throw new HttpError(403,'Sem permissao para gerenciar integracao compartilhada.');}
+function noDevConnection(req,res,next){
+ if(req.user?.global_role==='dev')return res.status(403).json({error:'O DEV pode preparar integracoes para usuarios apenas pela Administracao DEV. Nao pode conectar a propria conta.'});
+ next();
+}
 export async function providerUrl(input){
   let url;
   try { url = new URL(input); } catch { throw new HttpError(400, 'URL Evolution inválida'); }
@@ -69,6 +73,8 @@ async function saveIntegration(req,{type,name,config,status,token='',verify='',a
 }
 export function restoredIntegrationsRouter(){
  const router=Router();
+ // Read-only monitoring for DEV; all provisioning uses /api/dev/integrations.
+ router.use((req,res,next)=>req.method==='GET'?next():noDevConnection(req,res,next));
  router.get('/',wrap(async(req,res)=>{const connected=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'}});for(const row of connected){if(row.config?.provider==='evolution_api')try{await syncEvolutionStatus(req.orgId,row.id);}catch(error){console.warn('Evolution status:',error.message);}}const data=await prisma.integration.findMany({where:{org_id:req.orgId}});const visible=admin(req)?data:data.filter(i=>i.type!=='whatsapp');
    if(!admin(req)){const ids=await visibleChannelIds(req);visible.push(...data.filter(i=>i.type==='whatsapp'&&ids.includes(i.id)));}
    res.json({data:visible.map(i=>({...i,config:i.config??{}}))});}));

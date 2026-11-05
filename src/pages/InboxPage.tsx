@@ -476,7 +476,7 @@ export function InboxPage() {
   return (
     <div className="flex h-full">
       <Modal open={showMyWhatsApp} onClose={()=>setShowMyWhatsApp(false)} title="Meu WhatsApp • Evolution API" size="xl">
-        <ChannelsPanel canManage onChannelsChanged={refreshChannels} />
+        <ChannelsPanel canManage={false} canConnect onChannelsChanged={refreshChannels} />
       </Modal>
       {/* Conversations list */}
       <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col">

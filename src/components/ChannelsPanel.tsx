@@ -27,7 +27,7 @@ function ChannelStatus({ channel }: { channel: Channel }) {
   return <span className="badge badge-gray"><Unplug size={12} /> Desconectado</span>;
 }
 
-export function ChannelsPanel({ canManage = true, onChannelsChanged }: { canManage?: boolean; onChannelsChanged?: () => void }) {
+export function ChannelsPanel({ canManage = true, canConnect = false, onChannelsChanged }: { canManage?: boolean; canConnect?: boolean; onChannelsChanged?: () => void }) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,7 +196,7 @@ export function ChannelsPanel({ canManage = true, onChannelsChanged }: { canMana
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canManage && channel.status !== 'connected' && <button className="btn-primary text-xs" disabled={busyId === channel.id} onClick={() => void showQr(channel)}><QrCode size={14} /> Conectar com QR Code</button>}
+            {(canManage || canConnect) && channel.status !== 'connected' && <button className="btn-primary text-xs" disabled={busyId === channel.id} onClick={() => void showQr(channel)}><QrCode size={14} /> Conectar com QR Code</button>}
             <button className="btn-secondary text-xs" disabled={busyId === channel.id} onClick={() => void checkStatus(channel)}>
               {busyId === channel.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14}/>} Verificar
             </button>

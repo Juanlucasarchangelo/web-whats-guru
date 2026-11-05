@@ -29,6 +29,7 @@ function AppContent() {
   const { loading: orgLoading, currentOrg, permissions } = useOrg();
   const [currentPage, setCurrentPage] = useState<PageId>(() => {
     const path = window.location.pathname.replace(/\/$/, '');
+    if (new URLSearchParams(window.location.search).get('page') === 'devConsole') return 'devConsole';
     return path === '/ordem-do-dia' || path === '/odd' ? 'technicalOdd' : path === '/relatorio-tecnico' ? 'technicalReport' : 'dashboard';
   });
   const ordered: PageId[] = ['devConsole','dashboard','inbox','contacts','crm','chatbots','automations','instagramCrm','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];

@@ -10,7 +10,7 @@ import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/ev
 import { visibleChannelIds, admin } from '../services/channel-access.js';
 const id=z.string().uuid();
 const checkAdmin=req=>{if(!isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar acessos a numeros.');};
-const checkOwnAccess=req=>{if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
+const checkOwnAccess=req=>{if(req.user?.global_role==='dev')throw new HttpError(403,'DEV nao conecta WhatsApp. Use Administracao DEV para cadastrar instancias para usuarios.');if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
 const checkChannel=async(req,channelId)=>{const row=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});if(!row||(!admin(req)&&row.config?.owner_user_id!==req.user.id))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');return row;};
 function safe(row){return {owner_user_id:row.config?.owner_user_id??null,id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
 function webhookEndpoint(){

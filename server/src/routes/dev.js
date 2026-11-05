@@ -6,6 +6,7 @@ import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { roleRows, normalizeRole } from '../services/permissions.js';
 import { REGIONS, REGION_CODES, matchesLegacyRegion } from '../services/regions.js';
+import { devIntegrationsRouter } from './dev-integrations.js';
 
 const uuid=z.string().uuid();
 const emailSchema=z.string().trim().email().max(254).transform(v=>v.toLowerCase());
@@ -37,6 +38,7 @@ async function targetUser(id,actorId) {
 export function devRouter() {
   const router=Router();
   router.use(requireDev);
+  router.use('/integrations',devIntegrationsRouter());
   router.get('/summary',wrap(async(_req,res)=>{
     const [pending,total,active,organizations,teams]=await Promise.all([
       prisma.user.count({where:{approval_status:'pending'}}),

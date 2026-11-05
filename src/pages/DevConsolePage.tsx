@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ShieldCheck, UsersRound, Building2, UserRoundCheck, Layers3, Activity, RefreshCw, Search, X, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldCheck, UsersRound, Building2, UserRoundCheck, Layers3, Activity, RefreshCw, Search, X, Copy, Check, ChevronLeft, ChevronRight, Plug } from 'lucide-react';
 import { apiRequest } from '@/lib/api';
 import { useOrg } from '@/contexts/OrgContext';
+import { DevIntegrationsPanel } from '@/components/DevIntegrationsPanel';
 
-type Tab = 'pending' | 'users' | 'organizations' | 'teams' | 'activity';
+type Tab = 'pending' | 'users' | 'organizations' | 'teams' | 'integrations' | 'activity';
 type Membership = { id:string;org_id:string;org_name:string;role:string;status:string };
 type DevUser = { id:string;email:string;name:string;global_role:string;approval_status:string;is_active:boolean;requested_org_region?:string|null;requested_org_id?:string|null;created_at:string;last_login_at:string|null;memberships:Membership[];owned_organizations?:{id:string;name:string}[] };
 type DevOrg = { id:string;name:string;slug:string;status:string;plan:string;region?:string|null;_count:{org_members:number;teams:number} };
@@ -16,6 +17,7 @@ const navigation: {key:Tab;name:string;icon:typeof UsersRound}[] = [
   {key:'users',name:'Usuários',icon:UsersRound},
   {key:'organizations',name:'Empresas',icon:Building2},
   {key:'teams',name:'Equipes',icon:Layers3},
+  {key:'integrations',name:'Integrações',icon:Plug},
   {key:'activity',name:'Auditoria',icon:Activity},
 ];
 function date(value:string|null|undefined) { if(!value)return '—';const d=new Date(value);return Number.isNaN(d.getTime())?'—':d.toLocaleString('pt-BR'); }
@@ -199,6 +201,8 @@ export function DevConsolePage() {
 
     {tab==='teams'&&<section className="card overflow-hidden"><div className="border-b border-slate-200 p-5"><h2 className="font-semibold text-slate-900">Equipes de todas as empresas</h2><p className="text-sm text-slate-500">Exclusões respeitam vínculos de canais de WhatsApp.</p></div>
       <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="p-4">Equipe</th><th className="p-4">Empresa</th><th className="p-4">Membros</th><th className="p-4">Ações</th></tr></thead><tbody>{teams.map(t=><tr key={t.id} className="border-t border-slate-200"><td className="p-4 font-semibold text-slate-900">{t.name}</td><td className="p-4 text-slate-500">{t.org_name}</td><td className="p-4 text-slate-500">{t.members}</td><td className="p-4"><div className="flex gap-2"><button className={button} disabled={busy} onClick={()=>{const name=window.prompt('Novo nome da equipe:',t.name);if(name&&name!==t.name)void operate(`/dev/teams/${t.id}`,'PATCH',{name},'Equipe atualizada.');}}>Renomear</button><button className={danger} disabled={busy} onClick={()=>{const confirmation=window.prompt(`Para excluir a equipe, digite exatamente: ${t.name}`);if(confirmation===t.name)void operate(`/dev/teams/${t.id}`,'DELETE',{confirm_name:confirmation},'Equipe excluída.');}}>Excluir</button></div></td></tr>)}{!teams.length&&<tr><td colSpan={4} className="p-8 text-center text-slate-500">Nenhuma equipe cadastrada.</td></tr>}</tbody></table></div></section>}
+
+    {tab==='integrations'&&<DevIntegrationsPanel organizations={orgs} />}
 
     {tab==='activity'&&<section className="card overflow-hidden"><div className="border-b border-slate-200 p-5"><h2 className="font-semibold text-slate-900">Atividade recente</h2><p className="text-sm text-slate-500">Eventos administrativos globais e auditorias já registradas pelas empresas. Não inclui ações que o sistema antigo nunca auditou.</p></div>
       <div className="divide-y divide-slate-200">{events.map(e=><div key={e.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm"><div><p className="font-medium text-slate-900">{e.action.replaceAll('_',' ')}</p><p className="text-xs text-slate-500">{e.target_user_id?`Usuário: ${e.target_user_id}`:e.org_id?`Empresa: ${e.org_id}`:'Evento global'}</p></div><span className="text-slate-500">{date(e.created_at)}</span></div>)}{!events.length&&<div className="p-10 text-center text-slate-500">Nenhum evento registrado.</div>}</div></section>}

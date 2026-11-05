@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { ChannelsPanel } from '@/components/ChannelsPanel';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
@@ -42,6 +43,8 @@ const INTEGRATION_TYPES = [
 ];
 
 export function SettingsPage() {
+  const { user } = useAuth();
+  const isDev = user?.global_role === 'dev';
   const { currentOrg,currentMembership , can} = useOrg();
   const orgId = currentOrg?.id;
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -259,7 +262,8 @@ export function SettingsPage() {
 
       {activeTab === 'integrations' && (
         <div className="space-y-4">
-          <ChannelsPanel canManage={can('settings.manage')} />
+          {isDev && <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">A conta DEV apenas monitora as integrações desta empresa. Para preparar uma integração para um usuário, abra Administração DEV → Integrações.</div>}
+          <ChannelsPanel canManage={can('settings.manage') && !isDev} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));
@@ -294,10 +298,10 @@ export function SettingsPage() {
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 flex-shrink-0">
-                    <button onClick={() => openConfig(integType.type)} className="btn-secondary text-xs">
+                    {!isDev && <button onClick={() => openConfig(integType.type)} className="btn-secondary text-xs">
                       <Settings size={14} /> {existing ? 'Configurar' : 'Conectar'}
-                    </button>
-                    {existing && existing.status !== 'disconnected' && (
+                    </button>}
+                    {!isDev && existing && existing.status !== 'disconnected' && (
                       <button onClick={() => handleDisconnect(existing)} className="btn-ghost text-xs text-red-600">
                         Desconectar
                       </button>
