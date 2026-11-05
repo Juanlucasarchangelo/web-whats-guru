@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { can } from '../services/permissions.js';
+import { can, isMaster } from '../services/permissions.js';
 import { randomBytes, randomUUID, createCipheriv, createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -75,17 +75,23 @@ export function restoredIntegrationsRouter(){
  const router=Router();
  // Read-only monitoring for DEV; all provisioning uses /api/dev/integrations.
  router.use((req,res,next)=>req.method==='GET'?next():noDevConnection(req,res,next));
- router.get('/',wrap(async(req,res)=>{const connected=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'}});for(const row of connected){if(row.config?.provider==='evolution_api')try{await syncEvolutionStatus(req.orgId,row.id);}catch(error){console.warn('Evolution status:',error.message);}}const data=await prisma.integration.findMany({where:{org_id:req.orgId}});const visible=admin(req)?data:data.filter(i=>i.type!=='whatsapp');
-   if(!admin(req)){const ids=await visibleChannelIds(req);visible.push(...data.filter(i=>i.type==='whatsapp'&&ids.includes(i.id)));}
-   res.json({data:visible.map(i=>({...i,config:i.config??{}}))});}));
+ router.get('/',wrap(async(req,res)=>{
+   const allowedIds=await visibleChannelIds(req);
+   const connected=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp',id:{in:allowedIds}}});
+   for(const row of connected){if(row.config?.provider==='evolution_api')try{await syncEvolutionStatus(req.orgId,row.id);}catch(error){console.warn('Evolution status:',error.message);}}
+   const data=await prisma.integration.findMany({where:{org_id:req.orgId}});
+   const visible=data.filter(i=>i.type!=='whatsapp'||allowedIds.includes(i.id));
+   res.json({data:visible.map(i=>({...i,config:i.config??{}}))});
+ }));
  router.get('/whatsapp/status',wrap(async(req,res)=>{const allowed=await visibleChannelIds(req);const state=await syncEvolutionStatus(req.orgId,allowed[0]??'00000000-0000-0000-0000-000000000000');if(!state)throw new HttpError(404,'Nenhuma Evolution configurada nesta organizacao.');res.json(state);}));
  router.get('/whatsapp/diagnostics',wrap(async(req,res)=>{
    checkAdmin(req);
-   const integration=await prisma.integration.findFirst({where:{org_id:req.orgId,type:'whatsapp'}});
+   const allowedIds=await visibleChannelIds(req);
+   const integration=await prisma.integration.findFirst({where:{org_id:req.orgId,type:'whatsapp',id:{in:allowedIds}}});
    if(!integration)throw new HttpError(404,'WhatsApp nao configurado nesta organizacao.');
    let webhook=null, webhook_error=null;
    if(integration.config?.provider==='evolution_api'){
-     try{webhook=await getEvolutionWebhookInfo(req.orgId);}catch(error){webhook_error=error.message;console.warn('[Evolution Diagnostics]',{org_id:req.orgId,error:error.message});}
+     try{webhook=await getEvolutionWebhookInfo(req.orgId,integration.id);}catch(error){webhook_error=error.message;console.warn('[Evolution Diagnostics]',{org_id:req.orgId,error:error.message});}
    }
    const lastEvent=await prisma.webhookEvent.findFirst({
      where:{org_id:req.orgId,source:'evolution_inbound'},orderBy:{received_at:'desc'},
@@ -105,6 +111,8 @@ export function restoredIntegrationsRouter(){
      throw new HttpError(400,'Configure EVOLUTION_WEBHOOK_PUBLIC_URL e EVOLUTION_WEBHOOK_SECRET (min. 32 caracteres) no server/.env.');
    const url=`${publicUrl}/api/webhooks/evolution/${encodeURIComponent(secret)}`;
    const integrationId=req.body?.integration_id||null;
+   if(integrationId && !(await visibleChannelIds(req)).includes(integrationId))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');
+   if(!integrationId && !isMaster(req))throw new HttpError(400,'Selecione uma instancia propria.');
    const configured=await configureEvolutionWebhook(req.orgId,url,integrationId);
    const webhook=await getEvolutionWebhookInfo(req.orgId,integrationId).catch(error=>({verification_error:error.message}));
    res.json({configured:configured.ok,instance:configured.instance,webhook});
@@ -119,10 +127,12 @@ export function restoredIntegrationsRouter(){
    if(!integrationId || typeof integrationId!=='string')throw new HttpError(400,'Selecione a integracao oficial que deseja desativar.');
    const integration=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
    if(!integration || integration.config?.connection_mode!=='official')throw new HttpError(400,'Para desconectar Evolution, use a acao do numero em Meus WhatsApps.');
+   if(!(await visibleChannelIds(req)).includes(integration.id))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');
    await prisma.integration.update({where:{id:integration.id},data:{status:'disconnected'}});
    return res.json({disconnected:true});
   }
   if(action==='connect_unofficial'){
+   if(!isMaster(req))throw new HttpError(403,'Use Meus WhatsApps para vincular apenas sua propria instancia.');
    const {provider_url,instance_name,api_key}=req.body||{};
    const url=await providerUrl(provider_url);
    if(!/^[\w-]{2,60}$/.test(instance_name||'') || typeof api_key!=='string'||!api_key.trim())throw new HttpError(400,'Informe instância e API key do Evolution.');
@@ -137,6 +147,7 @@ export function restoredIntegrationsRouter(){
    return res.json({connected:true,integration_id:saved.id,provider:'evolution_api',qr_code:qr});
   }
   if(action==='connect'){
+   if(!isMaster(req))throw new HttpError(403,'Integracao oficial deve ser preparada pelo Master ou DEV.');
    const {phone_number_id,business_account_id,access_token,app_secret}=req.body||{};
    if(!/^\d+$/.test(phone_number_id||'')||!/^\d+$/.test(business_account_id||'')||!access_token)throw new HttpError(400,'Dados oficiais da Meta inválidos.');
    const meta=await providerFetch(`https://graph.facebook.com/v23.0/${encodeURIComponent(phone_number_id)}?fields=display_phone_number,verified_name`,{headers:{Authorization:`Bearer ${access_token}`}});
@@ -160,6 +171,12 @@ export function restoredIntegrationsRouter(){
   }
   throw new HttpError(400,'Tipo inválido.');
  }));
- router.post('/disconnect',wrap(async(req,res)=>{checkAdmin(req); const {id}=req.body||{};await prisma.integration.updateMany({where:{id,org_id:req.orgId},data:{status:'disconnected'}});res.json({disconnected:true});}));
+ router.post('/disconnect',wrap(async(req,res)=>{
+   checkAdmin(req);const {id}=req.body||{};
+   const item=await prisma.integration.findFirst({where:{id,org_id:req.orgId}});
+   if(!item)throw new HttpError(404,'Integracao nao encontrada.');
+   if(item.type==='whatsapp'&&!(await visibleChannelIds(req)).includes(item.id))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');
+   await prisma.integration.update({where:{id:item.id},data:{status:'disconnected'}});res.json({disconnected:true});
+ }));
  return router;
 }
