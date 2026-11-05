@@ -1,6 +1,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
+import { initialDeliveryStatus } from './evolution-message-status.js';
+import { recordsFrom } from './evolution-sync-policy.js';
 
 import {
   digits,
@@ -111,15 +113,9 @@ async function getWhatsAppContactName({
         if (response.ok) {
           const payload = await response.json();
 
-          const contacts = Array.isArray(payload)
-            ? payload
-            : Array.isArray(payload?.data)
-              ? payload.data
-              : Array.isArray(payload?.contacts)
-                ? payload.contacts
-                : payload && typeof payload === 'object'
-                  ? [payload]
-                  : [];
+          let contacts;
+          try { contacts = recordsFrom(payload, 'contacts').records; }
+          catch { contacts = []; }
 
           const matchingContact = contacts.find(contact => {
             const remoteJid = String(
@@ -213,6 +209,7 @@ export async function importEvolutionMessage({
   envelope = {},
   expectedPhone = null,
   triggerAutomations = false,
+  historical = false,
 }) {
   const key = item?.key ?? item?.data?.key ?? {};
 
@@ -249,10 +246,15 @@ export async function importEvolutionMessage({
 
   const media = identifyEvolutionMedia(item);
 
-  const text =
-    getEvolutionText(item) ??
-    media?.caption ??
-    '';
+  const recoveredText = getEvolutionText(item) ?? media?.caption ?? '';
+  // Preserve a readable placeholder for some historic WhatsApp message types
+  // that Evolution stores without any extractable text (including templates).
+  // Such placeholders never trigger chatbots.
+  const unsupportedType = String(item?.messageType ?? '');
+  const placeholder = ({ templateMessage: '[Modelo de mensagem do WhatsApp]',
+    interactiveMessage: '[Mensagem interativa do WhatsApp]',
+    buttonsMessage: '[Mensagem com botoes]', listMessage: '[Mensagem com lista]' })[unsupportedType] ?? '';
+  const text = recoveredText || placeholder;
 
   if (!String(text).trim() && !media) {
     return ignored('ignored_unsupported_type');
@@ -371,7 +373,21 @@ export async function importEvolutionMessage({
         !contact ||
         isProvisionalName(contact.name, phone);
 
-      if (needsName) {
+      // History imports must not request the same contact's name once per old message.
+      // Contact names are synchronized independently during the initial bootstrap.
+      if (historical && !contact) {
+        contact = await prisma.contact.create({ data: { id: randomUUID(), org_id: orgId,
+          phone: `+${phone}`, name: `WhatsApp ${phone}`, custom_fields: {} } });
+      }
+
+      if (needsName && historical && !fromMe) {
+        const candidate = firstName([item?.pushName, item?.data?.pushName], phone);
+        if (candidate) {
+          contact = await prisma.contact.update({ where: { id: contact.id }, data: { name: candidate } });
+        }
+      }
+
+      if (needsName && !historical) {
         const resolved = await getWhatsAppContactName({
           orgId,
           integrationId: channelId,
@@ -427,7 +443,7 @@ export async function importEvolutionMessage({
           integrationId: channelId,
         });
 
-      const isNew = !fromMe && (
+      const isNew = !fromMe && !historical && (
         created ||
         await prisma.message.count({
           where: {
@@ -461,14 +477,14 @@ export async function importEvolutionMessage({
               media_size: media?.size ?? null,
               media_message: media?.message ?? null,
               status: fromMe
-                ? 'sent'
+                ? initialDeliveryStatus(item)
                 : 'received',
               is_internal: false,
               created_at: timestamp,
             },
           });
 
-          if (!fromMe) {
+          if (!fromMe && !historical) {
             await tx.conversation.update({
               where: {
                 id: conversation.id,
@@ -519,7 +535,8 @@ export async function importEvolutionMessage({
   if (
     result.outcome === 'received' &&
     !fromMe &&
-    triggerAutomations
+    triggerAutomations &&
+    !(!recoveredText && placeholder)
   ) {
     try {
       await processIncomingWorkflows({

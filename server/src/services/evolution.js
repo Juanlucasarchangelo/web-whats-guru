@@ -1,8 +1,11 @@
 import { createHash, createDecipheriv, randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
 import { importEvolutionMessage } from './evolution-inbound.js';
+import { saveEvolutionReceipt } from './evolution-receipts.js';
+import { initialDeliveryStatus } from './evolution-message-status.js';
 import { summarizeEvolutionResults } from './evolution-payload.js';
 import { HttpError } from '../http.js';
+import { HISTORY_PAGE_SIZE, MAX_HISTORY_PAGES, historyCutoff, messageDate, recordsFrom, shouldContinueHistory } from './evolution-sync-policy.js';
 
 function decodeKey() {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -32,7 +35,7 @@ export async function loadEvolution(orgId, integrationId = null) {
   if (!/^https?:\/\//.test(url) || !/^[\w-]{2,60}$/.test(instance)) throw new HttpError(503, 'URL ou instancia Evolution invalida.');
   return { integration, url, instance, apiKey: decrypt(credentials.access_token) };
 }
-async function evolutionGet(api, path, method = 'GET', body) {
+export async function evolutionGet(api, path, method = 'GET', body) {
   let response;
   try { response = await fetch(`${api.url}${path}`, { method, headers: { apikey: api.apiKey, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000), redirect: 'error' }); }
   catch { throw new HttpError(502, 'Nao foi possivel comunicar com Evolution API. Confira Docker e porta.'); }
@@ -67,7 +70,7 @@ export async function sendEvolutionText({ orgId, conversation, text, userId }) {
   const row = await prisma.$transaction(async tx => {
     const msg = await tx.message.create({ data: { id: randomUUID(), org_id: orgId, conversation_id: conversation.id, body: text, sender_type: 'agent', sender_id: userId, channel: 'whatsapp', status: 'accepted', is_internal: false } });
     await tx.conversation.update({ where: { id: conversation.id }, data: { last_message_at: msg.created_at } });
-    await tx.webhookEvent.create({ data: { id: randomUUID(), org_id: orgId, source: 'evolution_outbound', event_type: 'message_accepted', payload: { provider_message_id: providerId, local_message_id: msg.id }, processed: true, processed_at: new Date() } });
+    await tx.webhookEvent.create({ data: { id: randomUUID(), org_id: orgId, source: 'evolution_outbound', event_type: 'message_accepted', payload: { provider_message_id: providerId, local_message_id: msg.id, integration_id: api.integration.id }, processed: true, processed_at: new Date() } });
     return msg;
   });
   return row;
@@ -121,44 +124,69 @@ export async function getEvolutionWebhookInfo(orgId, integrationId = null) {
     has_url: Boolean(config?.url),
     events,
     messages_upsert: events.some(e => String(e).toUpperCase() === 'MESSAGES_UPSERT'),
+    messages_update: events.some(e => String(e).toUpperCase() === 'MESSAGES_UPDATE'),
   };
 }
 
-function extractHistoryRecords(result) {
-  if (Array.isArray(result)) return result;
-  const candidates = [result?.messages?.records, result?.messages, result?.data?.messages?.records,
-  result?.data?.messages, result?.data?.records, result?.records, result?.data];
-  for (const value of candidates) if (Array.isArray(value)) return value;
-  throw new HttpError(502, 'Formato inesperado no historico da Evolution. Confira a versao da API e seus logs.');
-}
-
-/** Recovery path when Docker cannot deliver webhooks: import the open conversation's recent messages. */
-export async function syncEvolutionConversation({ orgId, conversation }) {
-  if (!conversation.integration_id) throw new HttpError(409, 'Conversa sem numero vinculado. Execute a atualizacao do banco.');
+/** Read Evolution 2.3.7 message pages until the three-month boundary.
+ * Only the opened chat is imported; no automations or unread increments.
+ */
+export async function syncEvolutionConversation({ orgId, conversation, onProgress = () => {} }) {
+  if (!conversation.integration_id) throw new HttpError(409, 'Conversa sem numero de WhatsApp vinculado.');
   const api = await loadEvolution(orgId, conversation.integration_id);
   if (!api) throw new HttpError(404, 'Evolution nao configurada para esta conversa.');
   const contact = await prisma.contact.findFirst({
     where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true },
   });
   const phone = String(contact?.phone ?? '').replace(/\D/g, '');
-  if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato sem numero WhatsApp valido para sincronizar.');
+  if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato sem telefone valido.');
   const remoteJid = `${phone}@s.whatsapp.net`;
-  const data = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {
-    where: { key: { remoteJid } }, page: 1, offset: 50,
-  });
-  let items = extractHistoryRecords(data);
-  let fallback_used = false;
-  if (items.length === 0) {
-    // Certain Evolution releases ignore /chat/findMessages remoteJid filters.
-    const fallback = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', { page: 1, offset: 50 });
-    items = extractHistoryRecords(fallback);
-    fallback_used = true;
+  const cutoff = historyCutoff();
+  const counts = {};
+  let scanned = 0;
+  let pages = 0;
+  let completed = false;
+  let previousPageFingerprint = null;
+  for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
+    const payload = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {
+      where: { key: { remoteJid } }, page, offset: HISTORY_PAGE_SIZE,
+    });
+    const { records, pages: totalPages } = recordsFrom(payload, 'messages');
+    pages = page;
+    const fingerprint = records.length ? `${records[0]?.key?.id ?? ''}:${records[records.length - 1]?.key?.id ?? ''}:${records.length}` : null;
+    if (page > 1 && fingerprint && fingerprint === previousPageFingerprint) {
+      // Some releases silently ignore page/offset. Do not spin forever.
+      onProgress({ scanned, pages, counts: { ...counts }, warning: 'A Evolution repetiu a mesma pagina de historico.' });
+      break;
+    }
+    previousPageFingerprint = fingerprint;
+    for (const item of records) {
+      scanned++;
+      const date = messageDate(item);
+      // Do not import records without a verified timestamp or older than three months.
+      if (!date || date < cutoff) continue;
+      const result = await importEvolutionMessage({ orgId, integrationId: api.integration.id,
+        item, expectedPhone: phone, historical: true });
+      counts[result.outcome] = (counts[result.outcome] ?? 0) + 1;
+      // The provider may have newer delivery receipts for messages previously
+      // imported, even when the message body is already present in MySQL.
+      if ([true, 'true', 1, '1'].includes(item?.key?.fromMe)) {
+        const providerStatus = initialDeliveryStatus(item);
+        if (['delivered', 'read', 'played', 'failed'].includes(providerStatus)) {
+          const outcome = await saveEvolutionReceipt({ orgId, integrationId: api.integration.id,
+            item: { key: item.key, status: providerStatus } });
+          if (outcome === 'receipt_updated') counts.receipts_updated = (counts.receipts_updated ?? 0) + 1;
+        }
+      }
+    }
+    onProgress({ scanned, pages, counts: { ...counts }, cutoff: cutoff.toISOString() });
+    const decision = shouldContinueHistory({ records, page, totalPages, cutoff });
+    if (!decision.continue) { completed = true; break; }
   }
-  const results = [];
-  for (const item of items) results.push(await importEvolutionMessage({ orgId, integrationId: api.integration.id, item, expectedPhone: phone }));
-  const counts = summarizeEvolutionResults(results);
-  console.info('[Evolution Sync]', { instance: api.instance, conversationId: conversation.id, total: items.length, fallback_used, counts });
-  return { counts, scanned: items.length, fallback_used, synchronized_at: new Date().toISOString() };
+  console.info('[Evolution Sync]', { integrationId: api.integration.id, conversationId: conversation.id,
+    scanned, pages, completed, counts });
+  return { counts, scanned, pages, completed, truncated: !completed,
+    cutoff: cutoff.toISOString(), synchronized_at: new Date().toISOString() };
 }
 
 /** Download autenticado da mídia pela Evolution API. */

@@ -3,6 +3,8 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../db.js';
 import { importEvolutionMessage } from '../services/evolution-inbound.js';
 import { evolutionEventItems, summarizeEvolutionResults } from '../services/evolution-payload.js';
+import { bootstrapOnEvolutionConnection } from '../services/evolution-sync.js';
+import { saveEvolutionReceipt } from '../services/evolution-receipts.js';
 
 function constantTimeMatch(actual, expected) {
   const a = Buffer.from(String(actual ?? ''));
@@ -55,12 +57,21 @@ export function evolutionWebhookRouter() {
           });
         }
         if (results.length === 0) counts.empty_payload = 1;
+      } else if (event === 'messages.update') {
+        const results = [];
+        for (const item of evolutionEventItems(payload)) {
+          results.push({ outcome: await saveEvolutionReceipt({ orgId: integration.org_id,
+            integrationId: integration.id, item }) });
+        }
+        counts = summarizeEvolutionResults(results);
+        if (!results.length) counts.empty_payload = 1;
       } else if (event === 'connection.update') {
         const state = String(payload?.data?.state ?? payload?.data?.instance?.state ?? '');
         const status = state === 'open' ? 'connected' : state === 'connecting' ? 'connecting' : state === 'close' ? 'disconnected' : null;
         if (status) await prisma.integration.update({ where: { id: integration.id }, data: {
           status, ...(status === 'connected' ? { last_connected_at: new Date() } : {}),
         } });
+        if (status === 'connected') bootstrapOnEvolutionConnection({ orgId: integration.org_id, integrationId: integration.id });
         counts = { connection_update: 1 };
       } else {
         counts = { ignored_event: 1 };

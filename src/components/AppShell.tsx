@@ -52,7 +52,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
     signOut();
   }
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-screen h-[100dvh] bg-slate-50">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
@@ -216,7 +216,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           </div>
           <div className="w-8" />
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main className={currentPage === 'inbox' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto'}>
           {children}
         </main>
       </div>

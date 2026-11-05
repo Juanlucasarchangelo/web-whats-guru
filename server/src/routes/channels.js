@@ -8,6 +8,7 @@ import { encrypt, providerUrl, providerFetch } from './integrations-restore.js';
 import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus } from '../services/evolution.js';
 import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
 import { visibleChannelIds } from '../services/channel-access.js';
+import { queueEvolutionBootstrap, getEvolutionBootstrapStatus } from '../services/evolution-sync.js';
 const id=z.string().uuid();
 const checkAdmin=req=>{if(!isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar acessos a numeros.');};
 const checkOwnAccess=req=>{if(req.user?.global_role==='dev')throw new HttpError(403,'DEV nao conecta WhatsApp. Use Administracao DEV para cadastrar instancias para usuarios.');if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
@@ -29,7 +30,9 @@ export function channelsRouter(){
     if(row.config?.provider!=='evolution_api')return safe(row);
     try{
       const state=await syncEvolutionStatus(req.orgId,row.id);
-      return {...safe(row),status:state?.status??row.status,status_error:null};
+      if (state?.status === 'connected') queueEvolutionBootstrap({ orgId: req.orgId, integrationId: row.id });
+      return {...safe(row),status:state?.status??row.status,status_error:null,
+        contact_sync: getEvolutionBootstrapStatus(req.orgId, row.id)};
     }catch(error){
       console.warn('[Channels] Falha ao consultar estado:',{id:row.id,error:error.message});
       return {...safe(row),status_error:'Nao foi possivel consultar a Evolution agora.'};
@@ -62,6 +65,19 @@ export function channelsRouter(){
   try {webhook=await configureEvolutionWebhook(req.orgId,webhookEndpoint(),integration.id);}
   catch(error){webhook={ok:false,error:String(error.message).slice(0,200)};console.warn('[Channels] Webhook nao configurado:',{instance:data.instance_name,error:error.message});}
   res.status(201).json({channel:safe(integration),webhook});
+ }));
+ router.get('/:id/contact-sync',wrap(async(req,res)=>{
+  const integrationId=id.parse(req.params.id);
+  await checkChannel(req,integrationId);
+  res.json({sync:getEvolutionBootstrapStatus(req.orgId,integrationId)});
+ }));
+ router.post('/:id/contact-sync',wrap(async(req,res)=>{
+  const integrationId=id.parse(req.params.id);
+  const row=await checkChannel(req,integrationId);
+  if(row.config?.provider!=='evolution_api')throw new HttpError(400,'Sincronizacao disponivel somente para Evolution.');
+  const state=await syncEvolutionStatus(req.orgId,integrationId);
+  if(state?.status!=='connected')throw new HttpError(409,'Conecte o WhatsApp primeiro.');
+  res.status(202).json({sync:queueEvolutionBootstrap({orgId:req.orgId,integrationId,force:true})});
  }));
  router.post('/:id/qr',wrap(async(req,res)=>{
   checkOwnAccess(req);const integrationId=id.parse(req.params.id);

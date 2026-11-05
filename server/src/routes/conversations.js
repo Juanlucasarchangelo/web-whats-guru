@@ -7,12 +7,12 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { sendTextToWhatsApp } from '../services/whatsapp.js';
+import { queueEvolutionHistory, getEvolutionHistoryStatus } from '../services/evolution-sync.js';
 import { publicLocation } from '../services/evolution-media.js';
 
 import {
   loadEvolution,
   sendEvolutionText,
-  syncEvolutionConversation,
   fetchEvolutionMedia,
 } from '../services/evolution.js';
 
@@ -468,34 +468,28 @@ export function conversationsRouter() {
     );
   }));
 
-  // Lista as mensagens de uma conversa.
+  // Paginated message timeline. Older pages remain available indefinitely in MySQL.
   router.get('/:id/messages', wrap(async (req, res) => {
     const id = idParam.parse(req.params.id);
-
-    const conversation = await requireConversation(req, id);
-
-    if (!conversation) {
-      throw new HttpError(404, 'Conversa nao encontrada.');
+    await requireConversation(req, id);
+    const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || 100), 10) || 100, 1), 200);
+    const cursor = req.query.cursor ? idParam.parse(String(req.query.cursor)) : null;
+    if (cursor) {
+      const parent = await prisma.message.findFirst({ where: { id: cursor, conversation_id: id, org_id: req.orgId }, select: { id: true } });
+      if (!parent) throw new HttpError(404, 'Marcador de paginacao invalido.');
     }
-
-    const data = await prisma.message.findMany({
-      where: {
-        conversation_id: id,
-        org_id: req.orgId,
-      },
-      take: 100,
-      orderBy: {
-        created_at: 'desc',
-      },
+    const rows = await prisma.message.findMany({
+      where: { conversation_id: id, org_id: req.orgId },
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit);
     res.json({
       data: data.reverse().map(({ media_message, ...row }) => ({
-        ...row,
-        media_location: row.media_type === 'location'
-          ? publicLocation(media_message)
-          : null,
+        ...row, media_location: row.media_type === 'location' ? publicLocation(media_message) : null,
       })),
+      next_cursor: hasMore ? data[data.length - 1].id : null,
     });
   }));
 
@@ -552,36 +546,32 @@ export function conversationsRouter() {
     })
   );
 
-  // Sincroniza mensagens com a Evolution API.
-  router.post(
-    '/:id/sync-evolution',
-    wrap(async (req, res) => {
-      const id = idParam.parse(req.params.id);
-
-      const conversation = await requireConversation(req, id);
-
-      if (!conversation) {
-        throw new HttpError(404, 'Conversa nao encontrada.');
-      }
-
-      if (conversation.channel !== 'whatsapp') {
-        throw new HttpError(
-          400,
-          'Sincronizacao Evolution disponivel apenas para WhatsApp.'
-        );
-      }
-
-      const result = await syncEvolutionConversation({
-        orgId: req.orgId,
-        conversation,
-      });
-
-      res.json({
-        ok: true,
-        ...result,
-      });
-    })
-  );
+  // History is imported in a background job, never in the HTTP request itself.
+  router.get('/:id/sync-evolution-status', wrap(async (req, res) => {
+    const id = idParam.parse(req.params.id);
+    const conversation = await requireConversation(req, id);
+    const channel = conversation.integration_id ? await prisma.integration.findFirst({
+      where: { id: conversation.integration_id, org_id: req.orgId, type: 'whatsapp' },
+      select: { config: true },
+    }) : null;
+    // Provider type is non-secret; never expose instance credentials or metadata.
+    res.json({ sync: getEvolutionHistoryStatus(req.orgId, id),
+      provider: channel?.config?.provider || null });
+  }));
+  router.post('/:id/sync-evolution', wrap(async (req, res) => {
+    const id = idParam.parse(req.params.id);
+    const conversation = await requireConversation(req, id);
+    if (conversation.channel !== 'whatsapp') throw new HttpError(400, 'Somente conversas WhatsApp podem sincronizar.');
+    // DEV/Master/Administrador may READ historical messages from the entire
+    // selected organization, but channel administration remains owner/Master only.
+    if (!admin(req)) {
+      const channelIds = await visibleChannelIds(req);
+      if (!channelIds.includes(conversation.integration_id))
+        throw new HttpError(403, 'Sem acesso as mensagens desta conversa.');
+    }
+    const force = req.body?.force === true;
+    res.status(202).json({ ok: true, sync: queueEvolutionHistory({ orgId: req.orgId, conversation, force }) });
+  }));
 
   // Envia uma mensagem.
   router.post('/:id/messages', wrap(async (req, res) => {

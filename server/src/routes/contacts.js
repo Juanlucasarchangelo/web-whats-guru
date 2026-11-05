@@ -21,7 +21,10 @@ export function contactsRouter() {
   router.get('/', wrap(async (req, res) => {
     const page = Math.min(Math.max(Number.parseInt(String(req.query.page || 1), 10) || 1, 1), 100000);
     const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || 25), 10) || 25, 1), 100);
-    const where = { org_id: req.orgId };
+    const q = String(req.query.q ?? '').trim().slice(0, 80);
+    const where = { org_id: req.orgId, ...(q ? { OR: [
+      { name: { contains: q } }, { phone: { contains: q } },
+    ] } : {}) };
     const [data, total] = await Promise.all([
       prisma.contact.findMany({ where, orderBy: { created_at: 'desc' }, skip: (page - 1) * limit, take: limit }),
       prisma.contact.count({ where }),

@@ -12,7 +12,12 @@ export function getEvolutionText(item) {
   if (message?.ephemeralMessage?.message) message = message.ephemeralMessage.message;
   if (message?.viewOnceMessage?.message) message = message.viewOnceMessage.message;
   if (message?.viewOnceMessageV2?.message) message = message.viewOnceMessageV2.message;
-  return message?.conversation ?? message?.extendedTextMessage?.text ?? message?.imageMessage?.caption ?? message?.videoMessage?.caption ?? item?.text ?? null;
+  return message?.conversation ?? message?.extendedTextMessage?.text ??
+    message?.imageMessage?.caption ?? message?.videoMessage?.caption ??
+    message?.templateMessage?.hydratedTemplate?.hydratedContentText ??
+    message?.templateMessage?.fourRowTemplate?.contentText ??
+    message?.buttonsMessage?.contentText ?? message?.listMessage?.description ??
+    item?.text ?? null;
 }
 
 function getPhoneJid(jid) {
