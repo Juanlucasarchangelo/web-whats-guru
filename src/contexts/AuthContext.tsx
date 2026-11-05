@@ -2,14 +2,14 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { apiRequest, ApiError, clearToken, getToken, setToken, type AuthMeResponse } from '@/lib/api';
 import type { UserProfile } from '@/types';
 
-interface LocalUser { id: string; email: string; user_metadata?: { full_name?: string } }
+interface LocalUser { id: string; email: string; global_role?: string; must_change_password?: boolean; user_metadata?: { full_name?: string } }
 interface LocalSession { access_token: string }
 interface AuthContextValue {
   session: LocalSession | null;
   user: LocalUser | null;
   profile: UserProfile | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, fullName: string, region: string) => Promise<{ error: string | null; pending?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -57,6 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; };
   }, []);
 
+  // Outros dispositivos permanecem sem acesso assim que o DEV revoga a versao do JWT.
+  // Verificacao periodica serve apenas para retirar a interface antiga de quem esta ocioso.
+  useEffect(() => {
+    const endSession=() => { clearToken();setUser(null);setProfile(null);setSession(null); };
+    window.addEventListener('falacomigo:session-ended',endSession);
+    const refreshId=window.setInterval(() => {
+      if (!getToken()) return;
+      void apiRequest('/auth/me').catch(() => { /* 401 e tratado por apiRequest */ });
+    },45000);
+    return () => {window.removeEventListener('falacomigo:session-ended',endSession);window.clearInterval(refreshId);};
+  },[]);
+
   async function finishAuth(result: AuthResult): Promise<void> {
     setToken(result.token);
     try {
@@ -70,11 +82,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signUp(email: string, password: string, fullName: string) {
+  async function signUp(email: string, password: string, fullName: string, region: string) {
     try {
-      const result = await apiRequest<AuthResult>('/auth/register', {
-        method: 'POST', body: JSON.stringify({ email, password, fullName }),
+      const result = await apiRequest<AuthResult & { pending?: boolean }>('/auth/register', {
+        method: 'POST', body: JSON.stringify({ email, password, fullName, org_id: region }),
       });
+      if ('pending' in result && result.pending === true) return { error: null, pending: true };
       await finishAuth(result);
       return { error: null };
     } catch (err) {
@@ -95,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    if (getToken()) await apiRequest('/auth/logout',{method:'POST'}).catch(()=>{});
     clearToken();
     setSession(null);
     setUser(null);

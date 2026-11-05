@@ -21,6 +21,9 @@ import { technicalDocumentsRouter, publicTechnicalDocumentsRouter } from './rout
 import { requirePermission, requireAny } from './services/permissions.js';
 import { guardOperations, guardLocal } from './middleware/route-permissions.js';
 import { stalkerRouter } from './routes/stalker.js';
+import { devRouter } from './routes/dev.js';
+import { auditMutation } from './middleware/activity.js';
+import { conversationScope } from './services/channel-access.js';
 
 export function createApp(config) {
   const app = express();
@@ -45,7 +48,7 @@ export function createApp(config) {
       await prisma.$queryRaw`SELECT 1 AS ok`;
       const [tables] = await prisma.$queryRaw`SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations'`;
       const count = Number(tables?.total ?? 0);
-      return res.status(count === 27 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 27 });
+      return res.status(count === 28 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 28 });
     } catch {
       return res.status(503).json({ api: 'online', mysql: 'disconnected' });
     }
@@ -53,6 +56,7 @@ export function createApp(config) {
 
   app.use('/api/webhooks/evolution', evolutionWebhookRouter());
   app.use('/api/auth', authRouter(config, authLimiter));
+  app.use('/api/dev', authenticate(config), devRouter());
   // Endpoint público é APENAS para criar; nenhum GET público consulta documentos.
   const publicSubmitLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 30,
     standardHeaders: 'draft-8', legacyHeaders: false,
@@ -63,7 +67,7 @@ export function createApp(config) {
   // O salvamento autenticado pode incluir fotografias, sem ampliar outras APIs.
   app.use('/api/technical-documents', (req, res, next) => req.method === 'POST'
     ? express.json({ limit: '80mb' })(req, res, next) : next());
-  app.use('/api', authenticate(config), withOrganization, (() => {
+  app.use('/api', authenticate(config), auditMutation, withOrganization, (() => {
     const secure = express.Router();
     secure.use('/access',accessRouter());
     secure.get('/organizations/current', wrap(async (req, res) => {
@@ -71,11 +75,13 @@ export function createApp(config) {
       res.json({ ...organization, role: req.role });
     }));
     secure.get('/dashboard/summary', requirePermission('page.dashboard'), wrap(async (req, res) => {
+      const scope=await conversationScope(req);
+      const visibleIds=(await prisma.conversation.findMany({where:scope,select:{id:true}})).map(x=>x.id);
       const [contacts, conversations, open, messages] = await Promise.all([
         prisma.contact.count({ where: { org_id: req.orgId } }),
-        prisma.conversation.count({ where: { org_id: req.orgId } }),
-        prisma.conversation.count({ where: { org_id: req.orgId, status: 'open' } }),
-        prisma.message.count({ where: { org_id: req.orgId } }),
+        prisma.conversation.count({ where: scope }),
+        prisma.conversation.count({ where: {AND:[scope,{status:'open'}]} }),
+        prisma.message.count({ where: { org_id: req.orgId, conversation_id:{in:visibleIds} } }),
       ]);
       res.json({ contacts, conversations, open_conversations: open, messages });
     }));

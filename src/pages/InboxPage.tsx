@@ -3,6 +3,7 @@ import { useOrg } from '@/contexts/OrgContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
+import { ChannelsPanel } from '@/components/ChannelsPanel';
 import { MessageMedia } from '@/components/inbox/MessageMedia';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -22,9 +23,14 @@ interface OrgMemberInfo {
   profile?: { full_name: string } | null;
 }
 export function InboxPage() {
-  const { currentOrg } = useOrg();
+  const { currentOrg, currentMembership, organizations, switchOrganization } = useOrg();
   const { user } = useAuth();
   const orgId = currentOrg?.id;
+  const isDev = user?.global_role === 'dev';
+  const isMaster = currentMembership?.role === 'master' || currentMembership?.role === 'owner';
+  const showMasterFilters = isMaster && !isDev;
+  const showNumberFilter = isDev || isMaster;
+  const [showMyWhatsApp,setShowMyWhatsApp] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [availableContacts, setAvailableContacts] = useState<Contact[]>([]);
@@ -139,16 +145,16 @@ export function InboxPage() {
     return () => { active = false; };
   }, [orgId]);
 
-  useEffect(() => {
+  const refreshChannels=useCallback(async()=>{
     if(!orgId)return;
-    let active=true;
-    apiRequest<{data:ChannelInfo[]}>('/channels').then(r=>{
-      if(!active)return;
+    try{
+      const r=await apiRequest<{data:ChannelInfo[]}>('/channels');
       setChannels(r.data??[]);
-      setNewChannelId(r.data?.length===1?r.data[0].id:'');
-    }).catch(err=>console.warn('[Inbox] Números indisponíveis:',err));
-    return()=>{active=false;};
+      setNewChannelId(old => old && r.data?.some(c=>c.id===old) ? old : r.data?.length===1?r.data[0].id:'');
+    }catch(err){console.warn('[Inbox] Números indisponíveis:',err);}
   },[orgId]);
+  useEffect(()=>{setChannelFilter('all');setSelectedConv(null);setChannels([]);},[orgId]);
+  useEffect(()=>{void refreshChannels();},[refreshChannels]);
   const selectedChannel = channels.find(c=>c.id===selectedConv?.integration_id);
   // Load tags, quick replies, and members
   useEffect(() => {
@@ -468,9 +474,12 @@ export function InboxPage() {
   };
   const contact = selectedConv ? contactsMap[selectedConv.contact_id] : null;
   return (
-    <div className="flex h-full min-h-0 min-w-0 w-full overflow-hidden">
+    <div className="flex h-full">
+      <Modal open={showMyWhatsApp} onClose={()=>setShowMyWhatsApp(false)} title="Meu WhatsApp • Evolution API" size="xl">
+        <ChannelsPanel canManage onChannelsChanged={refreshChannels} />
+      </Modal>
       {/* Conversations list */}
-      <div className="w-full md:w-80 lg:w-96 md:shrink-0 min-w-0 min-h-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
+      <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col">
         {/* Search & filters */}
         <div className="p-4 border-b border-slate-100 space-y-3">
           <button type="button" className="btn-primary w-full justify-center" onClick={openNewConversation}><Plus size={16}/> Nova conversa</button>
@@ -486,7 +495,9 @@ export function InboxPage() {
             </select><div className="flex gap-2"><button className="btn-primary" onClick={createConversation}>Criar</button><button className="btn-secondary" onClick={()=>setCreatingConversation(false)}>Cancelar</button></div></>
             : <p className="text-sm text-slate-500">Cadastre um contato primeiro na aba Contatos.</p>}
           </div>}
-          {whatsAppProvider === 'evolution_api' && (
+          {isDev && organizations.length>0 && <div><label className="block mb-1 text-xs font-medium text-slate-600">Conversas por empresa</label><select className="input w-full text-sm" aria-label="Empresa das conversas" value={orgId||''} onChange={e=>switchOrganization(e.target.value)}>{organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></div>}
+          {!isMaster && !isDev && <button type="button" className="btn-secondary w-full text-xs" onClick={()=>setShowMyWhatsApp(true)}>Conectar meu WhatsApp (Evolution API)</button>}
+          {showMasterFilters && whatsAppProvider === 'evolution_api' && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-600 space-y-2">
               <div className="flex flex-wrap gap-2 items-center justify-between">
                 <span>WhatsApp Evolution • Recebimento</span>
@@ -496,10 +507,10 @@ export function InboxPage() {
               {webhookInfo && <p role="status" className="break-words">{webhookInfo}</p>}
             </div>
           )}
-          <select className="input w-full text-sm" aria-label="Filtrar número de WhatsApp" value={channelFilter} onChange={e=>{setChannelFilter(e.target.value);setSelectedConv(null);}}>
+          {showNumberFilter && <select className="input w-full text-sm" aria-label="Filtrar número de WhatsApp" value={channelFilter} onChange={e=>{setChannelFilter(e.target.value);setSelectedConv(null);}}>
             <option value="all">Todos os números</option>
             {channels.map(c=><option key={c.id} value={c.id}>{c.name} · {c.instance_name||'Oficial'}</option>)}
-          </select>
+          </select>}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
@@ -521,7 +532,7 @@ export function InboxPage() {
               <option value="pending">Pendentes</option>
               <option value="closed">Fechadas</option>
             </select>
-            <select
+            {showNumberFilter && <select
               value={assigneeFilter}
               onChange={(e) => setAssigneeFilter(e.target.value)}
               className="rounded-lg border-0 bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200 cursor-pointer"
@@ -529,7 +540,7 @@ export function InboxPage() {
               <option value="all">Todos atendentes</option>
               <option value="me">Atribuídas a mim</option>
               <option value="unassigned">Sem atribuição</option>
-            </select>
+            </select>}
             {tags.length > 0 && (
               <select
                 value={tagFilter}
@@ -543,7 +554,7 @@ export function InboxPage() {
           </div>
         </div>
         {/* Conversation list */}
-        <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : conversations.length === 0 ? (
@@ -579,7 +590,7 @@ export function InboxPage() {
                     <p className="text-xs text-slate-400 mt-0.5">
                       {conv.status === 'open' ? 'Aberta' : conv.status === 'pending' ? 'Pendente' : 'Fechada'}
                       {memberName(conv.assigned_to) && ` · ${memberName(conv.assigned_to)}`}
-                      {channels.length>1 && ` · ${channels.find(x=>x.id===conv.integration_id)?.name||'Número antigo'}`}
+                      {conv.channel === 'whatsapp' && ` · WhatsApp: ${channels.find(x=>x.id===conv.integration_id)?.name || 'Sem instância vinculada'}`}
                     </p>
                   </div>
                 </button>
@@ -590,16 +601,16 @@ export function InboxPage() {
       </div>
       {/* Chat area */}
       {selectedConv ? (
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-slate-50 overflow-hidden">
+        <div className="flex-1 flex flex-col bg-slate-50">
           {/* Chat header */}
-          <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between min-w-0 gap-2">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 flex-shrink-0">
                 {(contact?.name ?? '?').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <p className="font-medium text-slate-900 truncate">{contact?.name ?? 'Desconhecido'}</p>
-                <div className="flex flex-wrap items-center gap-2 mt-0.5 min-w-0">
+                <div className="flex items-center gap-2 mt-0.5">
                   <span className={`badge ${
                     selectedConv.status === 'open' ? 'badge-green' :
                     selectedConv.status === 'pending' ? 'badge-yellow' : 'badge-gray'
@@ -618,7 +629,7 @@ export function InboxPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1">
               {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'evolution_api' && (
                 <button type="button" className="btn-ghost px-2 py-1.5" disabled={syncing}
                   onClick={() => void syncFromEvolution(selectedConv.id, true)}
@@ -652,7 +663,7 @@ export function InboxPage() {
             </div>
           )}
           {/* Messages */}
-          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 space-y-3">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {loadingMessages ? (
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : messages.length === 0 ? (
@@ -661,8 +672,8 @@ export function InboxPage() {
               messages.map((msg) => {
                 const isAgent = msg.sender_type === 'agent' || msg.sender_type === 'bot';
                 return (
-                  <div key={msg.id} className={`flex min-w-0 w-full ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] min-w-0 rounded-2xl px-4 py-2.5 ${
+                  <div key={msg.id} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                       isAgent
                         ? msg.is_bot ? 'bg-purple-100 text-purple-900' : 'bg-blue-600 text-brand-on-accent'
                         : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-100'
@@ -674,7 +685,7 @@ export function InboxPage() {
                       )}
                       <MessageMedia message={msg} />
                       {msg.body && !(msg.media_type && /^\[(Imagem|Vídeo|Áudio|Documento|Figurinha|Localização)\]$/.test(msg.body)) && (
-                        <p className="text-sm whitespace-pre-wrap break-words" style={{ overflowWrap: 'anywhere' }}>{msg.body}</p>
+                        <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
                       )}
                       <div className={`flex items-center gap-1 mt-1 text-xs ${isAgent ? (msg.is_bot ? 'text-purple-500' : 'text-blue-200') : 'text-slate-400'}`}>
                         {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -693,7 +704,7 @@ export function InboxPage() {
           </div>
           {/* Message input */}
           {selectedConv.status !== 'closed' && (
-            <div className="bg-white border-t border-slate-200 p-3 min-w-0 shrink-0">
+            <div className="bg-white border-t border-slate-200 p-3">
               {showQuickReplies && (
                 <div className="mb-2 rounded-lg border border-slate-200 shadow-sm max-h-48 overflow-y-auto">
                   <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
@@ -724,7 +735,7 @@ export function InboxPage() {
                 {selectedConv.channel === 'whatsapp' && whatsAppProvider === 'meta' && <button type="button" className="btn-ghost text-xs" onClick={sendApprovedTemplate}>Enviar template aprovado</button>}
                 <button type="button" className="btn-ghost text-xs" disabled={suggestingAI} onClick={suggestWithAI}><Bot size={14} className="inline mr-1"/>{suggestingAI?'Gerando…':'Sugerir resposta com IA'}</button>
               </div>
-              <div className="flex items-end gap-2 min-w-0">
+              <div className="flex items-end gap-2">
                 <button
                   onClick={() => setShowQuickReplies(!showQuickReplies)}
                   className="btn-ghost px-2 py-2"
@@ -746,7 +757,7 @@ export function InboxPage() {
                   }}
                   placeholder="Digite sua mensagem..."
                   rows={1}
-                  className="flex-1 min-w-0 resize-none rounded-lg border-0 py-2.5 px-3.5 text-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-blue-600 max-h-32"
+                  className="flex-1 resize-none rounded-lg border-0 py-2.5 px-3.5 text-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-blue-600 max-h-32"
                 />
                 <button
                   onClick={handleSendMessage}

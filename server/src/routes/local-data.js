@@ -221,7 +221,7 @@ export function localDataRouter() {
           if(!admin(req) && table==='conversation_tags')await requireConversation(req,item.conversation_id,tx);
           if (table === 'messages') {
             // Channel and agent are established server-side; no real WhatsApp sending.
-            const conv = await tx.conversation.findFirst({ where: { id: item.conversation_id, org_id: req.orgId } });
+            const conv = await requireConversation(req,item.conversation_id,tx);
             if (!conv) throw new HttpError(404, 'Conversa nao encontrada.');
             const msg = await tx.message.create({ data: {
               id:randomUUID(), org_id:req.orgId, conversation_id:conv.id, channel:conv.channel,
@@ -286,7 +286,10 @@ export function localDataRouter() {
       const item = cleanWrite(table, values, 'update');
       enforce(table, item, 'update');
       await validateReferences(tx, table, item, req.orgId);
-      if(table==='conversations' && item.assigned_to){for(const existing of found)await requireAssigneeForChannel(req.orgId,item.assigned_to,existing.integration_id,tx);}
+      if(table==='conversations' && item.assigned_to){
+        if(!admin(req) && item.assigned_to!==req.user.id)throw new HttpError(403,'Atendente so pode atribuir conversas a si mesmo.');
+        for(const existing of found)await requireAssigneeForChannel(req.orgId,item.assigned_to,existing.integration_id,tx);
+      }
       if(!admin(req)&&item.conversation_id)await requireConversation(req,item.conversation_id,tx);
       if (table === 'org_members' && !item.role) throw new HttpError(400,'Perfil nao informado.');
       await tx[model].updateMany({ where, data: item });

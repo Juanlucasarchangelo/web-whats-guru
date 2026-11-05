@@ -4,12 +4,12 @@ import { useOrg } from '@/contexts/OrgContext';
 import {
   MessageCircle, LayoutDashboard, Inbox, Users, Kanban, Bot,
   Zap, Megaphone, CalendarClock, BarChart3, UsersRound, Settings,
-  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText, Instagram,
+  LogOut, Menu, X, UserRound, Moon, Sun, Wrench, ChevronDown, ClipboardList, FileText, Instagram, ShieldCheck,
 } from 'lucide-react';
 export type PageId =
   | 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'chatbots'
   | 'automations' | 'instagramCrm' | 'campaigns' | 'schedules' | 'reports'
-  | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport' | 'monitoring';
+  | 'devConsole' | 'team' | 'settings' | 'profile' | 'technicalOdd' | 'technicalReport' | 'monitoring';
 interface AppShellProps {
   currentPage: PageId;
   onNavigate: (page: PageId) => void;
@@ -93,6 +93,10 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
         </div>
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+          {can('page.devConsole') && <button type="button" onClick={() => handleNavigate('devConsole')}
+            className={`sidebar-item w-full ${currentPage === 'devConsole' ? 'sidebar-item-active' : ''}`}>
+            <ShieldCheck size={18}/><span className="flex-1 text-left">Administração DEV</span>
+          </button>}
           {navItems.filter(item => can(`page.${item.id}`)).map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;

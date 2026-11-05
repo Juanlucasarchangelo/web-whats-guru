@@ -11,6 +11,8 @@ const allowed = z.array(z.enum(NORMAL_KEYS)).max(NORMAL_KEYS.length).transform(a
 const createSchema=z.object({name,slug:slugSchema,description:z.string().trim().max(300).optional(),permissions:allowed}).strict();
 const editSchema=z.object({name:name.optional(),description:z.string().trim().max(300).nullable().optional(),permissions:allowed.optional()}).strict();
 const serialize=r=>({...r,permissions:Array.isArray(r.permissions)?r.permissions:[]});
+const roleOrder = new Map(['master','administrador','comercial','supervisor','tecnico'].map((slug,i)=>[slug,i]));
+const sortRoles = (a,b)=>(roleOrder.get(a.slug)??100)-(roleOrder.get(b.slug)??100)||a.name.localeCompare(b.name,'pt-BR');
 function requireMaster(req){if(!isMaster(req)||!can(req,'roles.manage'))throw new HttpError(403,'Somente Master pode gerenciar cargos e permissoes.');}
 export function accessRouter(){
  const router=Router();
@@ -18,7 +20,7 @@ export function accessRouter(){
  router.get('/catalog',wrap(async(req,res)=>{if(!can(req,'page.team'))throw new HttpError(403,'Sem permissao.');res.json({data:PERMISSIONS,restricted:[...RESERVED]});}));
  router.get('/roles',wrap(async(req,res)=>{
   if(!can(req,'page.team')&&!can(req,'team.members.manage'))throw new HttpError(403,'Sem permissao.');
-  res.json({data:(await prisma.accessRole.findMany({where:{org_id:req.orgId},orderBy:[{is_system:'desc'},{created_at:'asc'}]})).map(serialize)});
+  res.json({data:(await prisma.accessRole.findMany({where:{org_id:req.orgId},orderBy:[{is_system:'desc'},{created_at:'asc'}]})).sort(sortRoles).map(serialize)});
  }));
  router.post('/roles',wrap(async(req,res)=>{
   requireMaster(req);const input=createSchema.parse(req.body);

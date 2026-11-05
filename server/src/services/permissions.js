@@ -1,12 +1,13 @@
 /** Catálogo único: use a chave em menus, APIs e no editor de cargos. */
 export const PERMISSIONS = [
+  ['page.devConsole','DEV · Administração global','Global / Exclusivo DEV'],
   ['page.dashboard','Painel','Páginas'],
   ['page.inbox','Caixa de entrada','Páginas'],
   ['page.contacts','Contatos','Páginas'],
   ['page.crm','CRM Kanban','Páginas'],
   ['page.chatbots','Chatbots','Páginas'],
   ['page.automations','Automações','Páginas'],
-  ['page.instagramCrm','Automações · Stalker','Páginas'],
+  ['page.instagramCrm','Automações · Instagram CRM','Páginas'],
   ['page.campaigns','Campanhas','Páginas'],
   ['page.schedules','Agendamentos','Páginas'],
   ['page.reports','Relatórios','Páginas'],
@@ -24,8 +25,8 @@ export const PERMISSIONS = [
   ['roles.manage','Criar cargos e configurar permissões','Reservado ao Master'],
   ['members.assign_master','Criar ou atribuir Master','Reservado ao Master'],
 ].map(([key,label,group])=>({key,label,group}));
-export const ALL_KEYS = PERMISSIONS.map(p=>p.key);
-export const RESERVED = new Set(['roles.manage','members.assign_master']);
+export const ALL_KEYS = PERMISSIONS.map(p=>p.key).filter(k=>k!=='page.devConsole');
+export const RESERVED = new Set(['roles.manage','members.assign_master','page.devConsole']);
 export const NORMAL_KEYS = ALL_KEYS.filter(key=>!RESERVED.has(key));
 const pageKeys = ALL_KEYS.filter(k=>k.startsWith('page.'));
 export const SYSTEM_ROLES = [
@@ -37,7 +38,7 @@ export const SYSTEM_ROLES = [
 ];
 export const LEGACY_ROLE = {owner:'master',admin:'administrador',agent:'comercial'};
 export const normalizeRole = r=>LEGACY_ROLE[r]||r;
-export const isMaster = req=>req.role==='master';
+export const isMaster = req=>req.role==='master'||req.role==='dev';
 export const can = (req, permission)=>Array.isArray(req.permissions)&&req.permissions.includes(permission);
 export const hasAny = (req,...permissions)=>permissions.some(p=>can(req,p));
 export function requirePermission(permission) {

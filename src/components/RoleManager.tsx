@@ -51,7 +51,7 @@ export function RoleManager({ roles, onChange }: {roles:AccessRole[]; onChange:(
    <div><h2 className="font-semibold flex items-center gap-2"><ShieldCheck size={18}/> Cargos e permissões</h2><p className="text-sm text-slate-500 mt-1">Exclusivo do Master. Crie cargos e escolha exatamente quais páginas e funções podem acessar.</p></div>
    <button className="btn-primary" onClick={()=>choose('new')}><Plus size={16}/> Novo cargo</button>
   </div>
-  <div className="flex gap-2 flex-wrap">{roles.map(r=><button key={r.id} className={`px-3 py-2 rounded-lg text-sm border ${selected===r.id?'bg-blue-50 text-blue-700 border-blue-400':'border-slate-200'}`} onClick={()=>choose(r.id)}>{r.name}</button>)}</div>
+  <div className="flex gap-2 flex-wrap"><span className="px-3 py-2 rounded-lg text-sm border border-amber-400 text-amber-700 bg-amber-50" title="Conta global, não atribuível pela empresa">DEV · Global</span>{roles.map(r=><button key={r.id} className={`px-3 py-2 rounded-lg text-sm border ${selected===r.id?'bg-blue-50 text-blue-700 border-blue-400':'border-slate-200'}`} onClick={()=>choose(r.id)}>{r.name}</button>)}</div>
   {(isNew||record)&&<div className="border border-slate-200 rounded-xl p-4 space-y-4">
    {locked&&<p className="text-sm text-amber-700">Master possui acesso permanente a todas as funções, inclusive criação de outros Masters. Este cargo é protegido contra alterações.</p>}
    <div className="grid sm:grid-cols-2 gap-3"><div><label className="label">Nome do cargo</label><input className="input" maxLength={80} disabled={locked||saving} value={name} onChange={e=>{setName(e.target.value);if(isNew)setSlug(slugify(e.target.value));}}/></div>

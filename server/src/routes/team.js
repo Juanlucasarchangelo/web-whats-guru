@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { HttpError, wrap } from '../http.js';
 import { can, isMaster, normalizeRole } from '../services/permissions.js';
+import { notifyDevRequest } from '../services/dev-notifications.js';
 const id=z.string().uuid();
 const slugSchema=z.string().trim().regex(/^[a-z][a-z0-9_]{1,31}$/);
 const isAdmin=req=>can(req,'team.teams.manage');
@@ -16,18 +17,16 @@ async function ensureAssignable(req, slug) {
  if(slug==='master' && !isMaster(req))throw new HttpError(403,'Somente Master pode criar ou atribuir Master.');
 }
 async function protectMember(req,member){
+ const global=await prisma.user.findUnique({where:{id:member.user_id},select:{global_role:true}});
+ if(global?.global_role==='dev')throw new HttpError(403,'Somente a propria conta DEV pode administrar seu acesso.');
  if(member.user_id===req.user.id)throw new HttpError(403,'Nao e permitido alterar seu proprio cargo ou acesso.');
- if(normalizeRole(member.role)==='master'){
-  if(!isMaster(req))throw new HttpError(403,'Somente Master pode modificar outro Master.');
-  const count=await prisma.orgMember.count({where:{org_id:req.orgId,role:{in:['master','owner']},status:'active'}});
-  if(count<=1)throw new HttpError(403,'A empresa deve manter pelo menos um Master ativo.');
- }
+ if(normalizeRole(member.role)==='master')throw new HttpError(403,'Somente o DEV pode desativar, remover ou rebaixar um Master.');
 }
 export function teamRouter() {
  const router=Router();
  router.get('/overview',wrap(async(req,res)=>{
   const [members,teams,teamMembers,profiles]=await Promise.all([
-   prisma.orgMember.findMany({where:{org_id:req.orgId},orderBy:{created_at:'asc'}}),
+   prisma.orgMember.findMany({where:{org_id:req.orgId,users:{approval_status:{not:'deleted'}}},orderBy:{created_at:'asc'}}),
    prisma.team.findMany({where:{org_id:req.orgId},orderBy:{created_at:'asc'}}),
    prisma.teamMember.findMany({where:{team_id:{in:(await prisma.team.findMany({where:{org_id:req.orgId},select:{id:true}})).map(t=>t.id)}}}),
    prisma.userProfile.findMany({where:{user_id:{in:(await prisma.orgMember.findMany({where:{org_id:req.orgId},select:{user_id:true}})).map(m=>m.user_id)}}}),
@@ -35,7 +34,7 @@ export function teamRouter() {
   const userIds=members.map(m=>m.user_id);
   const users=userIds.length?await prisma.user.findMany({where:{id:{in:userIds}},select:{id:true,email:true,is_active:true}}):[];
   const up=new Map(users.map(u=>[u.id,u]));const pp=new Map(profiles.map(u=>[u.user_id,u]));
-  res.json({members:members.map(m=>({...m,email:up.get(m.user_id)?.email??'',full_name:pp.get(m.user_id)?.full_name??'Usuario',is_active:up.get(m.user_id)?.is_active??false})),teams,team_members:teamMembers});
+  res.json({members:members.map(m=>({...m,email:up.get(m.user_id)?.email??'',full_name:pp.get(m.user_id)?.full_name??'Usuario',is_active:up.get(m.user_id)?.is_active??false})),teams,team_members:teamMembers.filter(m=>up.has(m.user_id))});
  }));
  router.post('/users',wrap(async(req,res)=>{
   checkMembers(req);
@@ -45,21 +44,23 @@ export function teamRouter() {
   const initialPassword=randomBytes(24).toString('base64url');
   const hash=await bcrypt.hash(initialPassword,12);const userId=randomUUID();
   await prisma.$transaction(async tx=>{
-   await tx.user.create({data:{id:userId,email:data.email,password_hash:hash,is_active:true}});
+   await tx.user.create({data:{id:userId,email:data.email,password_hash:hash,is_active:false,approval_status:'pending',must_change_password:true}});
    await tx.userProfile.create({data:{id:randomUUID(),user_id:userId,full_name:data.full_name}});
-   await tx.orgMember.create({data:{id:randomUUID(),org_id:req.orgId,user_id:userId,role:data.role,status:'active'}});
+   await tx.orgMember.create({data:{id:randomUUID(),org_id:req.orgId,user_id:userId,role:data.role,status:'inactive'}});
+   await tx.devActivity.create({data:{id:randomUUID(),actor_id:req.user.id,target_user_id:userId,action:'registration_requested',details:{source:'team',org_id:req.orgId}}});
   });
-  res.status(201).json({email:data.email,initial_password:initialPassword});
+  await notifyDevRequest({email:data.email,fullName:data.full_name,createdAt:new Date().toISOString()});
+  res.status(201).json({email:data.email,initial_password:initialPassword,pending:true});
  }));
  router.post('/members',wrap(async(req,res)=>{
   checkMembers(req);
   const {email,role}=z.object({email:z.string().email().max(254),role:slugSchema.default('comercial')}).strict().parse(req.body);
   await ensureAssignable(req,role);
-  const user=await prisma.user.findUnique({where:{email:email.trim().toLowerCase()},select:{id:true,is_active:true}});
-  if(!user?.is_active)throw new HttpError(404,'Usuario nao cadastrado ou inativo. Crie uma conta na tela de cadastro antes de adicionar.');
+  const user=await prisma.user.findUnique({where:{email:email.trim().toLowerCase()},select:{id:true,is_active:true,approval_status:true}});
+  if(!user?.is_active || user.approval_status!=='approved')throw new HttpError(403,'Conta pendente de aprovacao DEV ou inativa.');
   const existing=await prisma.orgMember.findFirst({where:{org_id:req.orgId,user_id:user.id}});
   if(existing){
-   if(normalizeRole(existing.role)==='master' && !isMaster(req))throw new HttpError(403,'Somente Master pode modificar membros Master.');
+   if(normalizeRole(existing.role)==='master')throw new HttpError(403,'Somente DEV pode alterar membros Master.');
    if(existing.status==='active')throw new HttpError(409,'Usuario ja pertence a esta empresa.');
    const updated=await prisma.orgMember.update({where:{id:existing.id},data:{status:'active',role}});
    return res.json(updated);
@@ -73,6 +74,7 @@ export function teamRouter() {
   const member=await prisma.orgMember.findFirst({where:{id:memberId,org_id:req.orgId}});
   if(!member)throw new HttpError(404,'Membro nao encontrado.');
   await protectMember(req,member);
+  if(role && !isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar cargos de usuarios existentes.');
   if(role)await ensureAssignable(req,role);
   res.json(await prisma.orgMember.update({where:{id:memberId},data:{...(role?{role}:{}),...(status?{status}:{})}}));
  }));

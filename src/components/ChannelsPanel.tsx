@@ -27,7 +27,7 @@ function ChannelStatus({ channel }: { channel: Channel }) {
   return <span className="badge badge-gray"><Unplug size={12} /> Desconectado</span>;
 }
 
-export function ChannelsPanel({ canManage = true }: { canManage?: boolean }) {
+export function ChannelsPanel({ canManage = true, onChannelsChanged }: { canManage?: boolean; onChannelsChanged?: () => void }) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,12 +45,13 @@ export function ChannelsPanel({ canManage = true }: { canManage?: boolean }) {
     try {
       const result = await apiRequest<{ data: Channel[] }>('/channels');
       setChannels((result.data || []).filter(channel => channel.provider === 'evolution_api'));
+      onChannelsChanged?.();
     } catch (error) {
       toastError(error instanceof Error ? error.message : 'Não foi possível carregar os WhatsApps.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onChannelsChanged]);
   useEffect(() => { void load(); }, [load]);
 
   async function checkStatus(channel: Channel) {

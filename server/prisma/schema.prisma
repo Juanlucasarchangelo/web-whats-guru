@@ -13,6 +13,15 @@ model User {
   password_hash  String         @db.VarChar(255)
   email_verified Boolean        @default(false)
   is_active      Boolean        @default(true)
+  // DEV global: nunca e definido por cadastro, membro de empresa ou frontend.
+  global_role     String         @default("user") @db.VarChar(16)
+  approval_status String         @default("approved") @db.VarChar(20)
+  requested_org_name String?     @db.VarChar(150)
+  requested_org_region String?   @db.VarChar(32)
+  requested_org_id String? @db.Char(36)
+  approved_at     DateTime?
+  token_version   Int            @default(0)
+  must_change_password Boolean   @default(false)
   last_login_at  DateTime?
   created_at     DateTime       @default(now())
   updated_at     DateTime       @default(now()) @updatedAt
@@ -24,13 +33,14 @@ model User {
   conversations  Conversation[]
   internal_notes InternalNote[]
   org_members    OrgMember[]
-  organizations  Organization[]
   quick_replies  QuickReply[]
   schedules      Schedule[]
   team_members   TeamMember[]
   user_profiles  UserProfile?
   technical_documents TechnicalDocument[]
 
+  @@index([approval_status], map: "idx_users_approval_status")
+  @@index([requested_org_id], map: "idx_users_requested_org_id")
   @@map("users")
 }
 
@@ -38,7 +48,7 @@ model Organization {
   id                      String                  @id @default(uuid()) @db.Char(36)
   name                    String                  @db.Text
   slug                    String                  @unique(map: "uq_organizations_slug")
-  owner_id                String                  @db.Char(36)
+  region                  String?                 @db.VarChar(32)
   plan                    String                  @default("free") @db.VarChar(64)
   status                  String                  @default("active") @db.VarChar(64)
   settings                Json
@@ -56,7 +66,6 @@ model Organization {
   internal_notes          InternalNote[]
   messages                Message[]
   org_members             OrgMember[]
-  users                   User                    @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_organizations_owner")
   quick_replies           QuickReply[]
   schedules               Schedule[]
   tags                    Tag[]
@@ -66,7 +75,7 @@ model Organization {
   technical_counters      TechnicalDocumentCounter[]
   webhook_events          WebhookEvent[]
 
-  @@index([owner_id], map: "idx_organizations_owner_id")
+  @@index([region], map: "idx_organizations_region")
   @@map("organizations")
 }
 
@@ -251,10 +260,10 @@ model InternalNote {
   id              String       @id @default(uuid()) @db.Char(36)
   conversation_id String       @db.Char(36)
   org_id          String       @db.Char(36)
-  author_id       String       @db.Char(36)
+  author_id       String?       @db.Char(36)
   body            String       @db.LongText
   created_at      DateTime     @default(now())
-  users           User         @relation(fields: [author_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_author")
+  users           User?         @relation(fields: [author_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_notes_author")
   conversations   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_conversation")
   organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notes_org")
 
@@ -270,9 +279,9 @@ model QuickReply {
   shortcut      String
   title         String       @db.Text
   body          String       @db.LongText
-  created_by    String       @db.Char(36)
+  created_by    String?       @db.Char(36)
   created_at    DateTime     @default(now())
-  users         User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_quick_replies_creator")
+  users         User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_quick_replies_creator")
   organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_quick_replies_org")
 
   @@index([org_id], map: "idx_quick_replies_org")
@@ -288,11 +297,11 @@ model Attachment {
   file_url      String       @db.Text
   file_type     String?      @db.Text
   file_size     Int?
-  uploaded_by   String       @db.Char(36)
+  uploaded_by   String?       @db.Char(36)
   created_at    DateTime     @default(now())
   messages      Message?     @relation(fields: [message_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_message")
   organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_org")
-  users         User         @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachments_user")
+  users         User?         @relation(fields: [uploaded_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_attachments_user")
 
   @@index([org_id], map: "idx_attachments_org")
   @@index([message_id], map: "idx_attachments_message")
@@ -309,10 +318,10 @@ model Chatbot {
   status          String       @default("draft") @db.VarChar(32)
   trigger_channel String?      @db.Text
   trigger_keyword String?      @db.Text
-  created_by      String       @db.Char(36)
+  created_by      String?       @db.Char(36)
   created_at      DateTime     @default(now())
   updated_at      DateTime     @default(now()) @updatedAt
-  users           User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_chatbots_creator")
+  users           User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_chatbots_creator")
   organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_chatbots_org")
 
   @@index([org_id], map: "idx_chatbots_org")
@@ -328,10 +337,10 @@ model Automation {
   trigger       Json
   actions       Json
   status        String       @default("active") @db.VarChar(32)
-  created_by    String       @db.Char(36)
+  created_by    String?       @db.Char(36)
   created_at    DateTime     @default(now())
   updated_at    DateTime     @default(now()) @updatedAt
-  users         User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_creator")
+  users         User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_automations_creator")
   organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_org")
 
   @@index([org_id], map: "idx_automations_org")
@@ -355,12 +364,12 @@ model Campaign {
   delivered_count     Int                 @default(0)
   read_count          Int                 @default(0)
   failed_count        Int                 @default(0)
-  created_by          String              @db.Char(36)
+  created_by          String?              @db.Char(36)
   created_at          DateTime            @default(now())
   updated_at          DateTime            @default(now()) @updatedAt
   integration_id      String?             @db.Char(36)
   campaign_recipients CampaignRecipient[]
-  users               User                @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaigns_creator")
+  users               User?                @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_campaigns_creator")
   organizations       Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_campaigns_org")
 
   @@index([org_id], map: "idx_campaigns_org")
@@ -395,12 +404,12 @@ model Schedule {
   scheduled_at     DateTime
   channel          String       @default("whatsapp") @db.VarChar(64)
   status           String       @default("pending") @db.VarChar(32)
-  created_by       String       @db.Char(36)
+  created_by       String?       @db.Char(36)
   created_at       DateTime     @default(now())
   integration_id   String?      @db.Char(36)
   delivery_enabled Boolean      @default(false)
   contacts         Contact?     @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_contact")
-  users            User         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_creator")
+  users            User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_schedules_creator")
   organizations    Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedules_org")
 
   @@index([org_id], map: "idx_schedules_org_id")
@@ -524,4 +533,18 @@ model TechnicalDocumentCounter {
 
   @@id([org_id, doc_type])
   @@map("technical_document_counters")
+}
+
+// Trilha global de acoes administrativas. Nao depende de org para registrar cadastros pendentes.
+model DevActivity {
+  id             String   @id @default(uuid()) @db.Char(36)
+  actor_id       String?  @db.Char(36)
+  target_user_id String?  @db.Char(36)
+  action         String   @db.VarChar(100)
+  details        Json
+  created_at     DateTime @default(now())
+
+  @@index([created_at], map: "idx_dev_activity_created")
+  @@index([target_user_id], map: "idx_dev_activity_target")
+  @@map("dev_activity")
 }

@@ -19,7 +19,7 @@ export function encrypt(value) {
   const ciphertext=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);
   return `enc:${Buffer.concat([iv,cipher.getAuthTag(),ciphertext]).toString('base64')}`;
 }
-function checkAdmin(req) {if(!can(req,'settings.manage'))throw new HttpError(403,'Somente administrador.');}
+function checkAdmin(req) {if(!admin(req))throw new HttpError(403,'Somente Master ou DEV pode gerenciar a integracao compartilhada.');}
 export async function providerUrl(input){
   let url;
   try { url = new URL(input); } catch { throw new HttpError(400, 'URL Evolution inválida'); }
@@ -74,6 +74,7 @@ export function restoredIntegrationsRouter(){
    res.json({data:visible.map(i=>({...i,config:i.config??{}}))});}));
  router.get('/whatsapp/status',wrap(async(req,res)=>{const allowed=await visibleChannelIds(req);const state=await syncEvolutionStatus(req.orgId,allowed[0]??'00000000-0000-0000-0000-000000000000');if(!state)throw new HttpError(404,'Nenhuma Evolution configurada nesta organizacao.');res.json(state);}));
  router.get('/whatsapp/diagnostics',wrap(async(req,res)=>{
+   checkAdmin(req);
    const integration=await prisma.integration.findFirst({where:{org_id:req.orgId,type:'whatsapp'}});
    if(!integration)throw new HttpError(404,'WhatsApp nao configurado nesta organizacao.');
    let webhook=null, webhook_error=null;
@@ -102,7 +103,7 @@ export function restoredIntegrationsRouter(){
    const webhook=await getEvolutionWebhookInfo(req.orgId,integrationId).catch(error=>({verification_error:error.message}));
    res.json({configured:configured.ok,instance:configured.instance,webhook});
  }));
- router.get('/activity',wrap(async(req,res)=>{const [audit,events]=await Promise.all([prisma.auditLog.findMany({where:{org_id:req.orgId},orderBy:{created_at:'desc'},take:50}),prisma.webhookEvent.findMany({where:{org_id:req.orgId},orderBy:{received_at:'desc'},take:50})]);res.json({audit,events});}));
+ router.get('/activity',wrap(async(req,res)=>{checkAdmin(req);const [audit,events]=await Promise.all([prisma.auditLog.findMany({where:{org_id:req.orgId},orderBy:{created_at:'desc'},take:50}),prisma.webhookEvent.findMany({where:{org_id:req.orgId},orderBy:{received_at:'desc'},take:50})]);res.json({audit,events});}));
  router.post('/whatsapp',wrap(async(req,res)=>{
   checkAdmin(req);const {action}=req.body||{};
   if(action==='disconnect'){

@@ -11,6 +11,8 @@ import { CrmPage } from '@/pages/CrmPage';
 import { ChatbotsPage } from '@/pages/ChatbotsPage';
 import { AutomationsPage } from '@/pages/AutomationsPage';
 import { InstagramCrmPage } from '@/pages/InstagramCrmPage';
+import { DevConsolePage } from '@/pages/DevConsolePage';
+import { ForcePasswordChangePage } from '@/pages/ForcePasswordChangePage';
 import { CampaignsPage } from '@/pages/CampaignsPage';
 import { SchedulesPage } from '@/pages/SchedulesPage';
 import { ReportsPage } from '@/pages/ReportsPage';
@@ -29,7 +31,7 @@ function AppContent() {
     const path = window.location.pathname.replace(/\/$/, '');
     return path === '/ordem-do-dia' || path === '/odd' ? 'technicalOdd' : path === '/relatorio-tecnico' ? 'technicalReport' : 'dashboard';
   });
-  const ordered: PageId[] = ['dashboard','inbox','contacts','crm','chatbots','automations','instagramCrm','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];
+  const ordered: PageId[] = ['devConsole','dashboard','inbox','contacts','crm','chatbots','automations','instagramCrm','campaigns','schedules','reports','monitoring','technicalOdd','technicalReport','team','settings','profile'];
   const firstAllowed = ordered.find(page => permissions.includes(`page.${page}`));
   useEffect(() => {
     if (!orgLoading && firstAllowed && !permissions.includes(`page.${currentPage}`)) setCurrentPage(firstAllowed);
@@ -38,16 +40,19 @@ function AppContent() {
   if (authLoading || (user && orgLoading)) return <FullPageSpinner />;
   if (!user) return <AuthPage />;
 
-  if (!currentOrg) return <div className="p-8 text-slate-700">Você não possui uma organização ativa ou não foi possível carregar suas permissões.</div>;
+  if (user?.must_change_password) return <ForcePasswordChangePage />;
+  if (!currentOrg && user?.global_role !== 'dev') return <div className="p-8 text-slate-700">Você não possui uma organização ativa ou não foi possível carregar suas permissões.</div>;
   if (!firstAllowed) return <div className="p-8 text-slate-700">Seu cargo ainda não possui páginas autorizadas. Solicite acesso ao Master.</div>;
   if (!permissions.includes(`page.${currentPage}`)) return <FullPageSpinner />;
+  if (!currentOrg && user.global_role === 'dev' && currentPage !== 'devConsole') return <AppShell currentPage={currentPage} onNavigate={setCurrentPage}><div className="p-8 text-slate-700">Cadastre ou restaure uma empresa ativa em Administração DEV para utilizar os módulos dessa empresa.</div></AppShell>;
 
   return (
     <AppShell currentPage={currentPage} onNavigate={setCurrentPage}>
       {{
+        devConsole: <DevConsolePage />,
         dashboard: <DashboardPage />,
         contacts: <ContactsPage />,
-        inbox: <InboxPage />,
+        inbox: <InboxPage key={currentOrg?.id ?? 'no-org'} />,
         crm: <CrmPage />,
         chatbots: <ChatbotsPage />,
         automations: <AutomationsPage />,

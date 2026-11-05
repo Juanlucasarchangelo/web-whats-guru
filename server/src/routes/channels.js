@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { can } from '../services/permissions.js';
+import { can, isMaster } from '../services/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -9,8 +9,10 @@ import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus
 import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
 import { visibleChannelIds, admin } from '../services/channel-access.js';
 const id=z.string().uuid();
-const checkAdmin=req=>{if(!can(req,'settings.manage'))throw new HttpError(403,'Somente administradores podem configurar numeros.');};
-function safe(row){return {id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
+const checkAdmin=req=>{if(!isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar acessos a numeros.');};
+const checkOwnAccess=req=>{if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
+const checkChannel=async(req,channelId)=>{const row=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});if(!row||(!admin(req)&&row.config?.owner_user_id!==req.user.id))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');return row;};
+function safe(row){return {owner_user_id:row.config?.owner_user_id??null,id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
 function webhookEndpoint(){
  const root=process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim().replace(/\/$/,'');
  const secret=process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
@@ -36,7 +38,7 @@ export function channelsRouter(){
   res.json({data});
  }));
  router.post('/attach',wrap(async(req,res)=>{
-  checkAdmin(req);
+  checkOwnAccess(req);
   const data=z.object({provider_url:z.string().min(1),instance_name:z.string().regex(/^[\w-]{2,60}$/),api_key:z.string().min(1),name:z.string().trim().min(2).max(100).optional()}).strict().parse(req.body);
   const url=await providerUrl(data.provider_url);
   const existing=await prisma.integration.findMany({where:{type:'whatsapp'},select:{id:true,org_id:true,config:true}});
@@ -51,7 +53,7 @@ export function channelsRouter(){
   if(!['open','connecting','close'].includes(state))throw new HttpError(409,'Instancia Evolution nao encontrada ou estado desconhecido. Verifique o nome no Evolution Manager.');
   const integration=await prisma.$transaction(async tx=>{
    const row=await tx.integration.create({data:{id:randomUUID(),org_id:req.orgId,type:'whatsapp',name:data.name??data.instance_name,
-     config:{connection_mode:'unofficial',provider:'evolution_api',provider_url:url,instance_name:data.instance_name,team_ids:[]},
+     config:{connection_mode:'unofficial',provider:'evolution_api',provider_url:url,instance_name:data.instance_name,owner_user_id:req.user.id,team_ids:[]},
      status:state==='open'?'connected':state==='connecting'?'connecting':'disconnected',last_connected_at:state==='open'?new Date():null}});
    await tx.integrationCredential.create({data:{integration_id:row.id,org_id:req.orgId,access_token:encrypt(data.api_key.trim()),verify_token:encrypt(randomUUID())}});
    return row;
@@ -62,24 +64,24 @@ export function channelsRouter(){
   res.status(201).json({channel:safe(integration),webhook});
  }));
  router.post('/:id/qr',wrap(async(req,res)=>{
-  checkAdmin(req);const integrationId=id.parse(req.params.id);
-  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  checkOwnAccess(req);const integrationId=id.parse(req.params.id);
+  const row=await checkChannel(req,integrationId);
   if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
   res.set('Cache-Control','no-store');
   res.json(await getEvolutionConnectionQr(req.orgId,integrationId));
  }));
  router.post('/:id/logout',wrap(async(req,res)=>{
-  checkAdmin(req);const integrationId=id.parse(req.params.id);
-  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  checkOwnAccess(req);const integrationId=id.parse(req.params.id);
+  const row=await checkChannel(req,integrationId);
   if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
   const confirmation=z.object({confirm_instance:z.string()}).strict().parse(req.body);
   if(confirmation.confirm_instance!==row.config.instance_name)throw new HttpError(400,'Confirmacao de instancia incorreta.');
   res.json(await logoutEvolutionChannel(req.orgId,integrationId));
  }));
  router.patch('/:id/name',wrap(async(req,res)=>{
-  checkAdmin(req);const integrationId=id.parse(req.params.id);
+  checkOwnAccess(req);const integrationId=id.parse(req.params.id);
   const data=z.object({name:z.string().trim().min(2).max(100)}).strict().parse(req.body);
-  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  const row=await checkChannel(req,integrationId);
   if(!row || row.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
   const result=await prisma.integration.update({where:{id:row.id},data:{name:data.name}});
   res.json({channel:safe(result)});
@@ -92,8 +94,8 @@ export function channelsRouter(){
   res.json({webhook:await getEvolutionWebhookInfo(req.orgId,integrationId)});
  }));
  router.post('/:id/webhook',wrap(async(req,res)=>{
-  checkAdmin(req);const integrationId=id.parse(req.params.id);
-  const item=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  checkOwnAccess(req);const integrationId=id.parse(req.params.id);
+  const item=await checkChannel(req,integrationId);
   if(!item || item.config?.provider!=='evolution_api')throw new HttpError(404,'Instancia Evolution nao encontrada.');
   const webhook=await configureEvolutionWebhook(req.orgId,webhookEndpoint(),integrationId);
   res.json({webhook,verification:await getEvolutionWebhookInfo(req.orgId,integrationId)});

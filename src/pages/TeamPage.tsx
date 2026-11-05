@@ -17,7 +17,7 @@ type Overview = { members: Member[]; teams: Team[]; team_members: TeamLink[] };
 
 
 export function TeamPage(){
- const { currentOrg,can }=useOrg();const {user}=useAuth();
+ const { currentOrg,can }=useOrg();const {user,signOut}=useAuth();
  const isAdmin=can('team.teams.manage');
  const canManageMembers=can('team.members.manage');
  const isMaster=can('members.assign_master');
@@ -53,11 +53,11 @@ export function TeamPage(){
  async function invite(){if(await call('/team/members','POST',{email:email.trim(),role})){setInviteModal(false);setEmail('');}}
  async function createUser(){if(!newUserName.trim()||!email.trim())return;setSaving(true);
   try{const r=await apiRequest<{email:string;initial_password:string}>('/team/users',{method:'POST',body:JSON.stringify({full_name:newUserName.trim(),email:email.trim(),role})});
-   setGenerated(r);await load(true);toastSuccess('Usuário criado. Guarde a senha inicial apresentada.');}
+   setGenerated(r);await load(true);toastSuccess('Solicitação de usuário criada. O DEV precisa aprovar antes do acesso. Guarde a senha inicial.');}
   catch(e){toastError(e instanceof Error?e.message:'Erro ao cadastrar usuário');}finally{setSaving(false);}}
  async function changePassword(){if(newPwd.length<10)return;setSaving(true);try{
   await apiRequest('/auth/change-password',{method:'POST',body:JSON.stringify({current_password:currentPwd,new_password:newPwd})});
-  setPasswordModal(false);setCurrentPwd('');setNewPwd('');toastSuccess('Senha alterada');
+  setPasswordModal(false);setCurrentPwd('');setNewPwd('');toastSuccess('Senha alterada. Faça login novamente.');await signOut();
  }catch(e){toastError(e instanceof Error?e.message:'Erro ao alterar senha');}finally{setSaving(false);}}
 
  async function updateMember(member:Member,change:object){await call(`/team/members/${member.id}`,'PATCH',change);}
@@ -73,14 +73,14 @@ export function TeamPage(){
    {canManageMembers&&<button className="btn-secondary" onClick={()=>{setEmail('');setInviteModal(true);}}><Plus size={16}/> Adicionar existente</button>}
    {isAdmin&&<button className="btn-primary" onClick={()=>editTeam(null)}><Plus size={16}/> Novo time</button>}</div></div>
   <div className="card p-5"><h2 className="font-semibold text-slate-900 mb-1">Usuários e funções</h2>
-   <p className="text-xs text-slate-500 mb-4">O Master administra cargos e permissões. Administradores gerenciam usuários, exceto Masters. Os demais cargos possuem apenas os acessos definidos.</p>
+   <p className="text-xs text-slate-500 mb-4">O Master configura cargos e pode criar Masters. Somente o DEV pode rebaixar ou remover um Master. Novos usuários precisam de aprovação DEV.</p>
    <div className="divide-y divide-slate-100">{members.map(m=><div key={m.id} className="flex items-center justify-between gap-3 py-3 flex-wrap">
     <div className="flex items-center gap-3 min-w-0"><div className="rounded-full bg-blue-50 text-blue-700 h-10 w-10 flex items-center justify-center"><UserRound size={20}/></div>
      <div><div className="font-medium text-sm">{m.full_name} {m.user_id===user?.id&&<span className="text-xs text-slate-400">(você)</span>}</div>
      <p className="text-xs text-slate-500">{m.email||'Sem e-mail'} · {m.status==='active'?'Ativo':'Desativado'}</p></div></div>
     <div className="flex items-center gap-2"><span className="text-slate-500">{m.role==='master'?<Crown size={16}/>:m.role==='administrador'?<Shield size={16}/>:<UserRound size={16}/>}</span>
      {canManageMembers&&m.role!=='master'&&m.user_id!==user?.id?<>
-      <select className="input text-sm" value={m.role} disabled={saving} onChange={e=>void updateMember(m,{role:e.target.value})}>
+      <select className="input text-sm" value={m.role} disabled={saving||!isMaster} onChange={e=>void updateMember(m,{role:e.target.value})}>
        {selectableRoles.map(r=><option key={r.id} value={r.slug}>{r.name}</option>)}</select>
       {m.status!=='active'?<button className="btn-secondary text-xs" disabled={saving} onClick={()=>void updateMember(m,{status:'active'})}>Reativar</button>:
        <button className="btn-ghost text-red-600" title="Desativar acesso" disabled={saving} onClick={()=>setRemove({kind:'member',id:m.id,name:m.full_name})}><Trash2 size={16}/></button>}
@@ -97,19 +97,19 @@ export function TeamPage(){
      <div className="flex flex-wrap gap-1.5 mt-3">{assigned.length?assigned.map(m=><span key={m.user_id} className="badge badge-blue">{members.find(x=>x.user_id===m.user_id)?.full_name||'Usuário'}</span>):<span className="text-xs text-amber-600">Sem integrantes</span>}</div>
     </div>})}</div>}</div>
   <div className="card p-5"><h2 className="font-semibold flex items-center gap-2"><PhoneCall size={18}/> Permissões por WhatsApp</h2>
-   <p className="text-sm text-slate-500 mt-1 mb-4">Selecione quais times podem visualizar e responder cada número. Sem time selecionado = todos os atendentes ativos da empresa podem acessar.</p>
+   <p className="text-sm text-slate-500 mt-1 mb-4">Master e DEV administram os vínculos de times. Masters e Administradores visualizam todos os números da empresa; colaboradores acessam apenas os próprios números conectados.</p>
    {!channels.length?<p className="text-sm text-slate-500">Conecte seus números em Integrações para configurar acesso.</p>:channels.map(c=><div key={c.id} className="border-t border-slate-100 py-4">
     <div className="font-medium text-sm">{c.name} <span className="text-slate-500 font-normal">({c.instance_name??'WhatsApp'})</span></div>
     <div className="flex flex-wrap gap-3 mt-2">{teams.map(t=><label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
-     <input type="checkbox" disabled={!isAdmin||saving} checked={c.team_ids.includes(t.id)} onChange={e=>void saveAccess(c,e.target.checked?[...c.team_ids,t.id]:c.team_ids.filter(x=>x!==t.id))}/>{t.name}</label>)}
-     {!teams.length&&<span className="text-xs text-slate-500">Nenhum time criado: acesso liberado para os membros.</span>}</div>
+     <input type="checkbox" disabled={!isMaster||saving} checked={c.team_ids.includes(t.id)} onChange={e=>void saveAccess(c,e.target.checked?[...c.team_ids,t.id]:c.team_ids.filter(x=>x!==t.id))}/>{t.name}</label>)}
+     {!teams.length&&<span className="text-xs text-slate-500">Nenhum time criado. Cada colaborador visualiza somente os próprios números.</span>}</div>
    </div>)}</div>
   <Modal open={newUserModal} onClose={()=>{setNewUserModal(false);setGenerated(null);}} title="Criar usuário local" size="sm"><div className="space-y-3">
-   {generated?<div className="space-y-3"><p className="text-green-700 font-semibold">Usuário criado! A senha será exibida somente aqui.</p>
+   {generated?<div className="space-y-3"><p className="text-green-700 font-semibold">Usuário criado, aguardando aprovação DEV. A senha inicial será exibida somente aqui.</p>
     <p className="text-sm">E-mail: <strong>{generated.email}</strong></p>
     <div><label className="label">Senha inicial</label><input readOnly className="input font-mono" value={generated.initial_password}/></div>
     <button className="btn-secondary" onClick={()=>{void navigator.clipboard.writeText(`E-mail: ${generated.email}\nSenha inicial: ${generated.initial_password}`);toastSuccess('Credenciais copiadas');}}>Copiar credenciais</button>
-    <p className="text-xs text-slate-600">Envie ao usuário por um canal seguro. Peça para ele trocar a senha em Equipe & Permissões após entrar.</p>
+    <p className="text-xs text-slate-600">Envie ao usuário por um canal seguro. O usuário só poderá entrar depois que o DEV aprovar o cadastro.</p>
     <button className="btn-primary" onClick={()=>{setNewUserModal(false);setGenerated(null);}}>Concluído</button></div>:<>
     <div><label className="label">Nome completo</label><input className="input" value={newUserName} onChange={e=>setNewUserName(e.target.value)} placeholder="Nome do atendente"/></div>
     <div><label className="label">E-mail</label><input className="input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="atendente@empresa.com"/></div>

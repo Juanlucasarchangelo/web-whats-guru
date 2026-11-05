@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { apiRequest } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { MessageCircle, Mail, Lock, User as UserIcon, Loader2 } from 'lucide-react';
 
@@ -8,12 +9,17 @@ export function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [region, setRegion] = useState('');
+  const [companies,setCompanies]=useState<{id:string;name:string}[]>([]);
+  useEffect(()=>{if(mode==='signup')void apiRequest<{data:{id:string;name:string}[]}>('/auth/public-organizations').then(r=>setCompanies(r.data)).catch(()=>setCompanies([]));},[mode]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setLoading(true);
 
     if (mode === 'signup') {
@@ -27,8 +33,10 @@ export function AuthPage() {
         setLoading(false);
         return;
       }
-      const { error: err } = await signUp(email, password, fullName);
+      if (!region) { setError('Escolha a empresa regional.'); setLoading(false); return; }
+      const { error: err, pending } = await signUp(email, password, fullName, region);
       if (err) setError(err);
+      else if (pending) { setNotice('Cadastro recebido! Aguarde a aprovacao do DEV para entrar.'); setMode('login'); setPassword(''); }
     } else {
       const { error: err } = await signIn(email, password);
       if (err) setError(err);
@@ -86,6 +94,15 @@ export function AuthPage() {
               </div>
             )}
 
+            {mode === 'signup' && <div>
+              <label className="label" htmlFor="signup-region">Empresa</label>
+              <select id="signup-region" className="input w-full" value={region} onChange={e => setRegion(e.target.value)} required>
+                <option value="">Selecione a empresa...</option>
+                {companies.map(org=><option key={org.id} value={org.id}>{org.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">O DEV aprova seu cadastro como Administrador e pode promover a Master.</p>
+              {!companies.length&&<p className="mt-1 text-xs text-amber-500">Nenhuma empresa ativa disponível. Solicite o cadastro ao DEV.</p>}
+            </div>}
             <div>
               <label className="label">E-mail</label>
               <div className="relative">
@@ -116,6 +133,7 @@ export function AuthPage() {
               </div>
             </div>
 
+            {notice && <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">{notice}</div>}
             {error && (
               <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200">
                 {error}
@@ -134,7 +152,7 @@ export function AuthPage() {
           </form>
 
           <p className="mt-4 text-center text-xs text-slate-500">
-            Ao se cadastrar, sua empresa será criada automaticamente e você poderá começar a usar a plataforma.
+            Ao se cadastrar, seu acesso ficará pendente até a aprovação do administrador DEV.
           </p>
         </div>
       </div>

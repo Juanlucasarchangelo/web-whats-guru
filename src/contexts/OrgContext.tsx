@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { apiRequest, getSelectedOrg, selectOrg, type AuthMeResponse } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Organization, OrgMember } from '@/types';
@@ -21,6 +21,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [currentOrg, setCurrentOrg] = useState<Organization | null>(null);
   const [currentMembership, setCurrentMembership] = useState<OrgMember | null>(null);
   const [loading, setLoading] = useState(false);
+  const initialized = useRef(false);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [roleName, setRoleName] = useState('');
   const [organizations, setOrganizations] = useState<Array<{ id:string; name:string; role:string }>>([]);
@@ -35,22 +36,21 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!initialized.current) setLoading(true);
     try {
       const result = await apiRequest<AuthMeResponse>('/auth/me');
       setOrganizations(result.organizations);
       const org = result.organizations.find(o => o.id === getSelectedOrg()) || result.organizations[0];
       if (!org) {
-        setCurrentOrg(null);
-        setCurrentMembership(null);
-        setPermissions([]);
-        setRoleName('');
+        setCurrentOrg(null);setCurrentMembership(null);
+        setPermissions(result.user.global_role==='dev'?['page.devConsole','page.dashboard','page.inbox','page.contacts','page.crm','page.chatbots','page.automations','page.instagramCrm','page.campaigns','page.schedules','page.reports','page.monitoring','page.technicalOdd','page.technicalReport','page.team','page.settings','page.profile']:[]);
+        setRoleName(result.user.global_role==='dev'?'DEV':'');
         return;
       }
       selectOrg(org.id);
       setCurrentOrg({
         id: org.id, name: org.name, slug: org.slug, plan: org.plan,
-        status: org.status, owner_id: org.role === 'master' ? user.id : '',
+        status: org.status,
         settings: {}, created_at: '', updated_at: '',
       });
       const access = await apiRequest<{role:string;role_name:string;permissions:string[]}>('/access/me');
@@ -67,6 +67,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setPermissions([]);
       setRoleName('');
     } finally {
+      initialized.current = true;
       setLoading(false);
     }
   }, [user]);

@@ -42,13 +42,17 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401 && getToken()) {
+      clearToken();
+      window.dispatchEvent(new Event('falacomigo:session-ended'));
+    }
     throw new ApiError(response.status, typeof body?.error === 'string' ? body.error : `Falha ao acessar a API (HTTP ${response.status}).`);
   }
   return body as T;
 }
 
 export interface AuthMeResponse {
-  user: { id: string; email: string; is_active?: boolean };
+  user: { id: string; email: string; is_active?: boolean; global_role?: string; must_change_password?: boolean };
   profile: {
     id: string; user_id: string; full_name: string; avatar_url: string | null;
     phone: string | null; created_at: string; updated_at: string;
@@ -64,12 +68,6 @@ export async function apiBlob(path: string): Promise<Blob> {
   const org = getSelectedOrg();
   if (org) headers.set('x-org-id', org);
   const response = await fetch(`${API_BASE}/api${path}`, { headers });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(
-      response.status,
-      typeof body?.error === 'string' ? body.error : `Não foi possível baixar a mídia (HTTP ${response.status}).`
-    );
-  }
+  if (!response.ok) throw new ApiError(response.status, `Midia indisponivel (HTTP ${response.status}).`);
   return response.blob();
 }
