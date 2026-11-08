@@ -17,14 +17,32 @@ const oddSchema = z.object({
   tecnicos: z.array(z.object({ nome: string(), funcao: string() }).strict()).max(100),
   objetivos: z.array(string(2000)).max(150), observacoes: string(10000),
 }).strict();
-const reportSchema = z.object({
+// Mantém a leitura e regeneração dos relatórios anteriores, gravados com
+// status/servico/fotos globais, sem misturar esses campos ao novo formato.
+const reportBase = {
   cliente: required(), data: validDate, operacao: string(), endereco: string(500),
   numeroOdd: string().optional().default(''),
   tecnicos: z.array(string()).max(100),
-  status: z.enum(['concluido','parcial','pendente','']),
-  servico: required(10000), pendencias: z.array(string(10000)).max(100),
-  observacoes: string(10000), fotos: z.array(photo).max(10),
+  pendencias: z.array(string(10000)).max(100),
+  observacoes: string(10000),
+};
+const legacyReportSchema = z.object({
+  ...reportBase,
+  status: z.enum(['concluido', 'parcial', 'pendente', '']),
+  servico: required(10000),
+  fotos: z.array(photo).max(10),
 }).strict();
+const serviceSchema = z.object({
+  status: z.enum(['concluido', 'parcial', 'pendente']),
+  titulo: required(160),
+  descricao: required(10000),
+  fotos: z.array(photo).min(1).max(1),
+}).strict();
+const currentReportSchema = z.object({
+  ...reportBase,
+  servicos: z.array(serviceSchema).min(1).max(20),
+}).strict();
+const reportSchema = z.union([currentReportSchema, legacyReportSchema]);
 const requestSchema = z.discriminatedUnion('doc_type', [
   z.object({ doc_type: z.literal('odd'), payload: oddSchema, client_request_id: z.string().uuid() }).strict(),
   z.object({ doc_type: z.literal('technical_report'), payload: reportSchema, client_request_id: z.string().uuid() }).strict(),

@@ -36,3 +36,37 @@ test('Rejeita data inválida, payload de tipo incompatível, fotografia não JPE
   assert.equal(technicalDocumentSchemas.reportSchema.safeParse({ ...report, fotos: [{ dataUrl:'data:image/png;base64,AAA=', name:'Foto', width:10, height:10 }] }).success, false);
   assert.equal(technicalDocumentSchemas.oddSchema.safeParse({ ...odd, creator_user_id:'fake' }).success, false);
 });
+
+const currentReport = {
+  cliente: 'Cliente B', data: '2026-11-06', operacao: 'São Paulo',
+  endereco: 'Av. A, 123', numeroOdd: '', tecnicos: ['Juan'],
+  pendencias: ['Retorno agendado'], observacoes: '',
+  servicos: [
+    { status: 'concluido', titulo: 'Instalação', descricao: 'Instalação concluída',
+      fotos: [{ dataUrl: 'data:image/jpeg;base64,/9j/2Q==', name: 'instalacao.jpg', width: 10, height: 10 }] },
+    { status: 'parcial', titulo: 'Configuração', descricao: 'Testes pendentes',
+      fotos: [{ dataUrl: 'data:image/jpeg;base64,/9j/2Q==', name: 'configuracao.jpg', width: 10, height: 10 }] },
+  ],
+};
+
+test('Novo relatório vincula status, título, descrição e foto a cada serviço', () => {
+  const parsed = technicalDocumentSchemas.requestSchema.parse({
+    doc_type: 'technical_report', payload: currentReport, client_request_id: uuid,
+  });
+  assert.equal(parsed.payload.servicos.length, 2);
+  assert.equal(parsed.payload.servicos[1].fotos[0].name, 'configuracao.jpg');
+});
+
+test('Novo relatório exige foto, status, título e descrição em todos os serviços', () => {
+  for (const field of ['status', 'titulo', 'descricao', 'fotos']) {
+    const invalid = structuredClone(currentReport);
+    if (field === 'fotos') invalid.servicos[1].fotos = [];
+    else invalid.servicos[1][field] = '';
+    assert.equal(technicalDocumentSchemas.reportSchema.safeParse(invalid).success, false, field);
+  }
+});
+
+test('Novo relatório não aceita fotos globais sem vínculo nem campos extras', () => {
+  assert.equal(technicalDocumentSchemas.reportSchema.safeParse({ ...currentReport, fotos: [] }).success, false);
+  assert.equal(technicalDocumentSchemas.reportSchema.safeParse({ ...currentReport, servicos: [] }).success, false);
+});

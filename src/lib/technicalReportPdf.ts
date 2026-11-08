@@ -4,10 +4,19 @@ import { importsBrLogoJpegDataUrl } from './importsbrLogoData';
  */
 export type ReportStatus = 'concluido' | 'parcial' | 'pendente' | '';
 export type ReportPhoto = { dataUrl: string; name: string; width: number; height: number };
+export type ReportService = {
+  status: ReportStatus;
+  titulo: string;
+  descricao: string;
+  fotos: ReportPhoto[];
+};
 export type TechnicalReportData = {
   cliente: string; data: string; operacao: string; endereco: string; numeroOdd?: string;
-  tecnicos: string[]; status: ReportStatus; servico: string;
-  pendencias: string[]; observacoes: string; fotos: ReportPhoto[];
+  tecnicos: string[]; pendencias: string[]; observacoes: string;
+  // Formato novo: a foto pertence a um serviço individual.
+  servicos?: ReportService[];
+  // Legado: mantém a regeneração dos relatórios criados antes da alteração.
+  status?: ReportStatus; servico?: string; fotos?: ReportPhoto[];
 };
 
 const PW = 595.28; const PH = 841.89;
@@ -138,7 +147,7 @@ function field(pdf: PdfDocument, label: string, value: string, y: number) {
 function newPage(pdf: PdfDocument, title: string, numeroOdd?: string) { pdf.addPage(); header(pdf, title, numeroOdd); return 181; }
 function remaining(y: number, height: number) { return y + height < 805; }
 
-export function generateTechnicalPdf(data: TechnicalReportData, includePendencias = false): Blob {
+function generateLegacyTechnicalPdf(data: TechnicalReportData, includePendencias = false): Blob {
   const pdf = new PdfDocument(); header(pdf, 'Relatório de Obra', data.numeroOdd); let y = 184;
   y = section(pdf, 1, 'Identificação', y);
   y = field(pdf, 'Cliente', data.cliente, y);
@@ -152,27 +161,28 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
   pdf.text(40, y, 'Status do serviço', 10, true);
   const keys = ['concluido', 'parcial', 'pendente']; const labels = ['CONCLUÍDO', 'PARCIAL', 'PENDENTE'];
   for (let i = 0; i < 3; i++) {
-    const active = keys[i] === data.status; const x = 40 + i * 174;
+    const active = keys[i] === (data.status || ''); const x = 40 + i * 174;
     pdf.rect(x, y + 10, 165, 26, active ? (i === 0 ? C.green : i === 1 ? C.yellow : C.red) : [249, 248, 246]);
     pdf.text(x + 37, y + 27, labels[i], 9, true, active && i !== 1 ? ([255, 255, 255] as const) : C.slate);
   }
   y += 59;
   pdf.text(40, y, 'Descrição do serviço realizado', 10, true); y += 22;
-  for (const line of pdf.wrap(data.servico, 500, 11)) {
+  for (const line of pdf.wrap(data.servico || '', 500, 11)) {
     if (!remaining(y, 19)) { y = newPage(pdf, 'Relatório de Obra — Continuação', data.numeroOdd); }
     pdf.text(40, y, line, 11); y += 17;
   }
   y += 25;
   // Observações vêm no final do documento (após as fotografias), como no modelo.
-  if (data.fotos.length) {
-    for (let i = 0; i < data.fotos.length; i++) {
+  const legacyPhotos = data.fotos || [];
+  if (legacyPhotos.length) {
+    for (let i = 0; i < legacyPhotos.length; i++) {
       y = newPage(pdf, 'Registro Fotográfico', data.numeroOdd);
       y = section(pdf, 4, 'Registro fotográfico', y);
-      pdf.text(40, y, `Fotografia ${i + 1} de ${data.fotos.length}`, 10, false, C.slate); y += 20;
-      const isLast = i === data.fotos.length - 1;
+      pdf.text(40, y, `Fotografia ${i + 1} de ${legacyPhotos.length}`, 10, false, C.slate); y += 20;
+      const isLast = i === legacyPhotos.length - 1;
       const photoH = isLast && data.observacoes.trim() ? 440 : 520;
       pdf.border(40, y, 515, photoH);
-      const photo = data.fotos[i]; pdf.picture(photo.dataUrl, photo.width, photo.height, 48, y + 8, 499, photoH - 16);
+      const photo = legacyPhotos[i]; pdf.picture(photo.dataUrl, photo.width, photo.height, 48, y + 8, 499, photoH - 16);
       y += photoH + 21;
       if (isLast && data.observacoes.trim()) {
         y = section(pdf, 5, 'Observações', y);
@@ -214,6 +224,115 @@ export function generateTechnicalPdf(data: TechnicalReportData, includePendencia
     }
   }
   return pdf.finish();
+}
+
+/** Layout atual: cada serviço e sua fotografia têm uma identificação inequívoca. */
+function generateServicesTechnicalPdf(data: TechnicalReportData, includePendencias: boolean): Blob {
+  const title = includePendencias ? 'Relatório Técnico Completo' : 'Relatório Técnico Cliente';
+  const pdf = new PdfDocument();
+  header(pdf, title, data.numeroOdd);
+  let y = 184;
+  y = section(pdf, 1, 'Identificação', y);
+  y = field(pdf, 'Cliente', data.cliente, y);
+  pdf.text(40, y, 'Data', 10, true); pdf.text(305, y, 'Operação', 10, true);
+  pdf.text(40, y + 20, fmtDate(data.data), 11);
+  pdf.text(305, y + 20, data.operacao || '—', 11);
+  pdf.line(40, y + 26, 291, y + 26); pdf.line(305, y + 26, 555, y + 26);
+  y += 51;
+  y = field(pdf, 'Endereço', data.endereco, y);
+  if (!remaining(y, 80)) y = newPage(pdf, title, data.numeroOdd);
+  y = section(pdf, 2, 'Técnicos em campo', y);
+  y = field(pdf, 'Equipe', data.tecnicos.filter(Boolean).join(', '), y);
+  if (!remaining(y, 110)) y = newPage(pdf, title, data.numeroOdd);
+  y = section(pdf, 3, 'Serviços executados e fotografias', y);
+
+  const services = data.servicos || [];
+  for (let i = 0; i < services.length; i++) {
+    const item = services[i];
+    const num = String(i + 1).padStart(2, '0');
+    const serviceLabel = `SERVIÇO ${num}`;
+    const titleRows = pdf.wrap(item.titulo || 'Sem título', 480, 12);
+    if (!remaining(y, 87 + titleRows.length * 19)) y = newPage(pdf, `${title} - Serviços`, data.numeroOdd);
+    pdf.rect(40, y - 12, 515, 28, [248, 246, 241]);
+    pdf.rect(40, y - 12, 4, 28, C.yellow);
+    pdf.text(52, y + 6, serviceLabel, 11, true, C.black);
+    const statusText: Record<string, string> = { concluido: 'CONCLUÍDO', parcial: 'PARCIAL', pendente: 'PENDENTE' };
+    const statusColor = item.status === 'concluido' ? C.green : item.status === 'pendente' ? C.red : C.slate;
+    pdf.text(400, y + 6, statusText[item.status] || 'NÃO INFORMADO', 9, true, statusColor);
+    y += 47;
+    for (const line of titleRows) {
+      if (!remaining(y, 22)) y = newPage(pdf, `${title} - Serviços`, data.numeroOdd);
+      pdf.text(40, y, line, 12, true); y += 19;
+    }
+    y += 6;
+    pdf.text(40, y, 'Descrição do serviço', 10, true, C.slate);
+    y += 20;
+    for (const line of pdf.wrap(item.descricao || 'Sem descrição.', 500, 11)) {
+      if (!remaining(y, 22)) y = newPage(pdf, `${title} - Serviços`, data.numeroOdd);
+      pdf.text(40, y, line, 11); y += 18;
+    }
+    y += 22;
+
+    // A foto fica imediatamente após o serviço correspondente, em página própria,
+    // com número e título do serviço repetidos para não perder o vínculo.
+    const images = item.fotos || [];
+    for (let j = 0; j < images.length; j++) {
+      const photo = images[j];
+      y = newPage(pdf, 'Registro Fotográfico', data.numeroOdd);
+      y = section(pdf, 3, `Registro fotográfico - serviço ${num}`, y);
+      pdf.text(40, y, serviceLabel, 10, true, C.slate); y += 19;
+      for (const line of pdf.wrap(item.titulo || 'Sem título', 500, 11)) {
+        if (!remaining(y, 23)) y = newPage(pdf, 'Registro Fotográfico', data.numeroOdd);
+        pdf.text(40, y, line, 11, true); y += 18;
+      }
+      const fileLabel = `Foto ${j + 1} de ${images.length} - ${photo.name || 'Fotografia do serviço'}`;
+      for (const line of pdf.wrap(fileLabel, 490, 9)) {
+        if (!remaining(y, 20)) y = newPage(pdf, 'Registro Fotográfico', data.numeroOdd);
+        pdf.text(40, y, line, 9, false, C.slate); y += 15;
+      }
+      y += 10;
+      const photoHeight = Math.max(230, Math.min(500, 770 - y));
+      pdf.border(40, y, 515, photoHeight);
+      pdf.picture(photo.dataUrl, photo.width, photo.height, 48, y + 8, 499, photoHeight - 16);
+      y += photoHeight + 24;
+    }
+  }
+
+  y = newPage(pdf, 'Observações', data.numeroOdd);
+  y = section(pdf, 4, 'Observações', y);
+  for (const line of pdf.wrap(data.observacoes || 'Sem observações registradas.', 500, 11)) {
+    if (!remaining(y, 22)) y = newPage(pdf, 'Observações', data.numeroOdd);
+    pdf.text(40, y, line, 11); y += 18;
+  }
+
+  if (includePendencias) {
+    y = newPage(pdf, 'Relatório Completo - Pendências', data.numeroOdd);
+    y = section(pdf, 5, 'Pendências registradas', y);
+    const pending = data.pendencias.map(item => item.trim()).filter(Boolean);
+    if (!pending.length) {
+      pdf.text(40, y, 'Nenhuma pendência registrada nesta visita.', 11, false, C.green);
+    } else {
+      for (let i = 0; i < pending.length; i++) {
+        if (!remaining(y, 70)) y = newPage(pdf, 'Pendências - Continuação', data.numeroOdd);
+        pdf.text(40, y, `PENDÊNCIA ${String(i + 1).padStart(2, '0')}`, 10, true, C.red);
+        y += 24;
+        for (const line of pdf.wrap(pending[i], 495, 11)) {
+          if (!remaining(y, 22)) y = newPage(pdf, 'Pendências - Continuação', data.numeroOdd);
+          pdf.text(40, y, line, 11); y += 18;
+        }
+        if (!remaining(y, 28)) y = newPage(pdf, 'Pendências - Continuação', data.numeroOdd);
+        pdf.line(40, y + 3, 555, y + 3, C.line); y += 25;
+      }
+    }
+  }
+  return pdf.finish();
+}
+
+export function generateTechnicalPdf(data: TechnicalReportData, includePendencias = false): Blob {
+  // Documentos antigos não possuem "servicos" e mantêm a diagramação original.
+  return data.servicos?.length
+    ? generateServicesTechnicalPdf(data, includePendencias)
+    : generateLegacyTechnicalPdf(data, includePendencias);
 }
 
 export function generatePendingPdf(data: TechnicalReportData): Blob {

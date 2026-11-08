@@ -58,7 +58,7 @@ export function MonitoringPage() {
       } else {
         const full = variant === 'complete';
         pdfDownload(generateTechnicalPdf(details.payload as TechnicalReportData, full),
-          `${base} - Relatório técnico ${full ? 'completo' : 'sem pendências'}.pdf`);
+          `${base} - Relatório técnico ${full ? 'completo' : 'cliente'}.pdf`);
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível reconstruir o PDF.'); }
     finally { setBusyId(''); }
@@ -118,7 +118,7 @@ export function MonitoringPage() {
               <td className="px-4 py-4"><div className="flex flex-wrap gap-2">
                 {kind === 'odd' ? <button type="button" className="btn-secondary whitespace-nowrap" disabled={Boolean(busyId)} onClick={() => void regenerate(row, 'odd')}>{busyId === `${row.id}-odd` ? <Loader2 className="animate-spin" size={15}/> : <Download size={15}/>} PDF da ODD</button> : <>
                   <button type="button" className="btn-secondary whitespace-nowrap" disabled={Boolean(busyId)} onClick={() => void regenerate(row, 'complete')}>{busyId === `${row.id}-complete` ? <Loader2 className="animate-spin" size={15}/> : <Download size={15}/>} Completo</button>
-                  <button type="button" className="btn-secondary whitespace-nowrap" disabled={Boolean(busyId)} onClick={() => void regenerate(row, 'without')}>{busyId === `${row.id}-without` ? <Loader2 className="animate-spin" size={15}/> : <Download size={15}/>} Sem pendências</button>
+                  <button type="button" className="btn-secondary whitespace-nowrap" disabled={Boolean(busyId)} onClick={() => void regenerate(row, 'without')}>{busyId === `${row.id}-without` ? <Loader2 className="animate-spin" size={15}/> : <Download size={15}/>} Relatório técnico cliente</button>
                 </>}
               </div></td>
             </tr>)}</tbody>
