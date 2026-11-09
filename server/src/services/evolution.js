@@ -6,6 +6,7 @@ import { initialDeliveryStatus } from './evolution-message-status.js';
 import { summarizeEvolutionResults } from './evolution-payload.js';
 import { HttpError } from '../http.js';
 import { HISTORY_PAGE_SIZE, MAX_HISTORY_PAGES, historyCutoff, messageDate, recordsFrom, shouldContinueHistory } from './evolution-sync-policy.js';
+import { linkedHistoryJids, normalizeHistoricalItem } from './evolution-history-policy.js';
 
 function decodeKey() {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -128,8 +129,55 @@ export async function getEvolutionWebhookInfo(orgId, integrationId = null) {
   };
 }
 
-/** Read Evolution 2.3.7 message pages until the three-month boundary.
- * Only the opened chat is imported; no automations or unread increments.
+// A short-lived, per-instance alias index avoids re-reading thousands of contacts
+// every time a conversation is opened. Never cache or share across organizations.
+const historyAliases = new Map();
+const ALIAS_CACHE_MS = 10 * 60 * 1000;
+const ALIAS_PAGE_SIZE = 500;
+const MAX_ALIAS_PAGES = 30;
+
+async function evolutionHistoryAliases(api) {
+  const cacheKey = `${api.integration.org_id}:${api.integration.id}`;
+  const cached = historyAliases.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.promise;
+  const promise = (async () => {
+    const records = [];
+    const errors = [];
+    for (const endpoint of ['findChats', 'findContacts']) {
+      let previous = null;
+      for (let page = 1; page <= MAX_ALIAS_PAGES; page++) {
+        try {
+          const result = await evolutionGet(api, `/chat/${endpoint}/${encodeURIComponent(api.instance)}`,
+            'POST', { where: {}, page, offset: ALIAS_PAGE_SIZE });
+          const parsed = recordsFrom(result, endpoint === 'findChats' ? 'chats' : 'contacts');
+          const items = parsed.records;
+          const fingerprint = items.length ? JSON.stringify([items.length,
+            items[0]?.remoteJid ?? items[0]?.id, items[items.length - 1]?.remoteJid ?? items[items.length - 1]?.id]) : '';
+          if (!items.length || (page > 1 && fingerprint === previous)) break;
+          records.push(...items);
+          previous = fingerprint;
+          if ((parsed.pages && page >= parsed.pages) ||
+              (!parsed.pages && items.length < ALIAS_PAGE_SIZE) ||
+              (Array.isArray(result) && items.length > ALIAS_PAGE_SIZE)) break;
+        } catch (error) {
+          errors.push(`${endpoint}: ${String(error.message).slice(0, 110)}`);
+          break; // a failing metadata endpoint cannot prevent PN history sync
+        }
+      }
+    }
+    return { records, errors };
+  })();
+  historyAliases.set(cacheKey, { promise, expires: Date.now() + ALIAS_CACHE_MS });
+  if (historyAliases.size > 60) {
+    for (const [key, entry] of historyAliases) if (entry.expires <= Date.now()) historyAliases.delete(key);
+  }
+  return promise;
+}
+
+/** Recover up to three months of history from every VERIFIED JID for this contact.
+ * Evolution may store half a chat under phone@s.whatsapp.net and the other half
+ * under an opaque @lid address. Never import a LID unless Evolution maps it to
+ * the contact's telephone number in the same contact/chat record.
  */
 export async function syncEvolutionConversation({ orgId, conversation, onProgress = () => {} }) {
   if (!conversation.integration_id) throw new HttpError(409, 'Conversa sem numero de WhatsApp vinculado.');
@@ -140,53 +188,83 @@ export async function syncEvolutionConversation({ orgId, conversation, onProgres
   });
   const phone = String(contact?.phone ?? '').replace(/\D/g, '');
   if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato sem telefone valido.');
-  const remoteJid = `${phone}@s.whatsapp.net`;
   const cutoff = historyCutoff();
   const counts = {};
   let scanned = 0;
   let pages = 0;
-  let completed = false;
-  let previousPageFingerprint = null;
-  for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
-    const payload = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {
-      where: { key: { remoteJid } }, page, offset: HISTORY_PAGE_SIZE,
-    });
-    const { records, pages: totalPages } = recordsFrom(payload, 'messages');
-    pages = page;
-    const fingerprint = records.length ? `${records[0]?.key?.id ?? ''}:${records[records.length - 1]?.key?.id ?? ''}:${records.length}` : null;
-    if (page > 1 && fingerprint && fingerprint === previousPageFingerprint) {
-      // Some releases silently ignore page/offset. Do not spin forever.
-      onProgress({ scanned, pages, counts: { ...counts }, warning: 'A Evolution repetiu a mesma pagina de historico.' });
-      break;
-    }
-    previousPageFingerprint = fingerprint;
-    for (const item of records) {
-      scanned++;
-      const date = messageDate(item);
-      // Do not import records without a verified timestamp or older than three months.
-      if (!date || date < cutoff) continue;
-      const result = await importEvolutionMessage({ orgId, integrationId: api.integration.id,
-        item, expectedPhone: phone, historical: true });
-      counts[result.outcome] = (counts[result.outcome] ?? 0) + 1;
-      // The provider may have newer delivery receipts for messages previously
-      // imported, even when the message body is already present in MySQL.
-      if ([true, 'true', 1, '1'].includes(item?.key?.fromMe)) {
-        const providerStatus = initialDeliveryStatus(item);
-        if (['delivered', 'read', 'played', 'failed'].includes(providerStatus)) {
-          const outcome = await saveEvolutionReceipt({ orgId, integrationId: api.integration.id,
-            item: { key: item.key, status: providerStatus } });
-          if (outcome === 'receipt_updated') counts.receipts_updated = (counts.receipts_updated ?? 0) + 1;
+  let truncated = false;
+  // Start metadata discovery alongside the regular PN query. This lets the
+  // user see initial progress immediately instead of waiting for 4,900+ contacts.
+  const aliases = [`${phone}@s.whatsapp.net`];
+  let aliasWarnings = [];
+  const aliasesPromise = evolutionHistoryAliases(api).catch(error => ({
+    records: [], errors: [String(error.message).slice(0, 140)],
+  }));
+  const seenMessageIds = new Set();
+  for (let sourceIndex = 0; sourceIndex < aliases.length; sourceIndex++) {
+    const remoteJid = aliases[sourceIndex];
+    let previousPageFingerprint = null;
+    let completed = false;
+    for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
+      let payload;
+      try {
+        payload = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`, 'POST', {
+          where: { key: { remoteJid } }, page, offset: HISTORY_PAGE_SIZE,
+        });
+      } catch (error) {
+        if (sourceIndex === 0) throw error; // Primary lookup failed: a true sync error.
+        aliasWarnings.push(`Consulta de identificador alternativo: ${String(error.message).slice(0, 110)}`);
+        truncated = true;
+        break;
+      }
+      const { records, pages: totalPages } = recordsFrom(payload, 'messages');
+      pages++;
+      const fingerprint = records.length ? `${records[0]?.key?.id ?? ''}:${records[records.length - 1]?.key?.id ?? ''}:${records.length}` : null;
+      if (page > 1 && fingerprint && fingerprint === previousPageFingerprint) {
+        truncated = true;
+        break;
+      }
+      previousPageFingerprint = fingerprint;
+      for (const original of records) {
+        scanned++;
+        const item = normalizeHistoricalItem(original, remoteJid, phone);
+        const date = messageDate(item);
+        if (!date || date < cutoff) { counts.ignored_out_of_period = (counts.ignored_out_of_period ?? 0) + 1; continue; }
+        const providerId = String(item?.key?.id ?? item?.data?.key?.id ?? '');
+        if (providerId && seenMessageIds.has(providerId)) {
+          counts.duplicate = (counts.duplicate ?? 0) + 1;
+          continue;
+        }
+        if (providerId) seenMessageIds.add(providerId);
+        const result = await importEvolutionMessage({ orgId, integrationId: api.integration.id,
+          item, expectedPhone: phone, historical: true });
+        counts[result.outcome] = (counts[result.outcome] ?? 0) + 1;
+        if ([true, 'true', 1, '1'].includes(item?.key?.fromMe)) {
+          const providerStatus = initialDeliveryStatus(item);
+          if (['delivered', 'read', 'played', 'failed'].includes(providerStatus)) {
+            const outcome = await saveEvolutionReceipt({ orgId, integrationId: api.integration.id,
+              item: { key: item.key, status: providerStatus } });
+            if (outcome === 'receipt_updated') counts.receipts_updated = (counts.receipts_updated ?? 0) + 1;
+          }
         }
       }
+      onProgress({ scanned, pages, counts: { ...counts }, cutoff: cutoff.toISOString(), aliases: aliases.length });
+      const decision = shouldContinueHistory({ records, page, totalPages, cutoff });
+      if (!decision.continue) { completed = true; break; }
     }
-    onProgress({ scanned, pages, counts: { ...counts }, cutoff: cutoff.toISOString() });
-    const decision = shouldContinueHistory({ records, page, totalPages, cutoff });
-    if (!decision.continue) { completed = true; break; }
+    if (!completed) truncated = true;
+    if (sourceIndex === 0) {
+      const resolved = await aliasesPromise;
+      aliasWarnings = resolved.errors;
+      const verified = linkedHistoryJids(resolved.records, phone);
+      aliases.push(...verified.filter(jid => jid !== remoteJid));
+      onProgress({ scanned, pages, counts: { ...counts }, aliases: aliases.length });
+    }
   }
   console.info('[Evolution Sync]', { integrationId: api.integration.id, conversationId: conversation.id,
-    scanned, pages, completed, counts });
-  return { counts, scanned, pages, completed, truncated: !completed,
-    cutoff: cutoff.toISOString(), synchronized_at: new Date().toISOString() };
+    scanned, pages, aliases: aliases.length, truncated, counts, aliasWarnings });
+  return { counts, scanned, pages, aliases: aliases.length, alias_warning: aliasWarnings.length > 0,
+    truncated, cutoff: cutoff.toISOString(), synchronized_at: new Date().toISOString() };
 }
 
 /** Download autenticado da mídia pela Evolution API. */

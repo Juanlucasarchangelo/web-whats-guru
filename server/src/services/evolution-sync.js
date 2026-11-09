@@ -20,8 +20,10 @@ const retentionMs = 24 * 60 * 60 * 1000;
 
 function publicJob(state) {
   if (!state) return { status: 'not_started' };
-  const { status, contacts, chats, scanned, pages, counts, cutoff, truncated, partial, error, updated_at } = state;
-  return { status, contacts, chats, scanned, pages, counts, cutoff, truncated, partial, error, updated_at };
+  const { status, contacts, chats, scanned, pages, counts, aliases, alias_warning,
+    cutoff, truncated, partial, error, updated_at } = state;
+  return { status, contacts, chats, scanned, pages, counts, aliases, alias_warning,
+    cutoff, truncated, partial, error, updated_at };
 }
 function pruneJobs(map) {
   const now = Date.now();
@@ -52,7 +54,7 @@ export function getEvolutionBootstrapStatus(orgId, integrationId) {
   return getJob(bootstrapJobs, `${orgId}:${integrationId}`);
 }
 
-async function storeContact({ orgId, phone, name, cache }) {
+async function storeContact({ orgId, integrationId, phone, name, cache }) {
   return withConversationIdentityLock({ orgId, phone, integrationId: null }, async () => {
     let contact = cache.get(phone);
     if (!contact) contact = await prisma.contact.findFirst({
@@ -64,6 +66,11 @@ async function storeContact({ orgId, phone, name, cache }) {
     if (name && isPlaceholderContactName(contact.name, phone)) {
       contact = await prisma.contact.update({ where: { id: contact.id }, data: { name } });
     }
+    if (integrationId) await prisma.contactIntegration.upsert({
+      where: { contact_id_integration_id: { contact_id: contact.id, integration_id: integrationId } },
+      create: { contact_id: contact.id, integration_id: integrationId, org_id: orgId },
+      update: {},
+    });
     cache.set(phone, contact);
     return contact;
   });
@@ -78,17 +85,18 @@ async function readAll(api, endpoint, kind, onRecord) {
     const response = await evolutionGet(api, `/chat/${endpoint}/${encodeURIComponent(api.instance)}`,
       'POST', { where: {}, page, offset: CONTACT_PAGE_SIZE });
     const { records, pages } = recordsFrom(response, kind);
-    const idFor = record => record?.remoteJid ?? record?.key?.remoteJid ??
-      record?.lastMessage?.key?.remoteJid ?? record?.id;
-    const fingerprint = records.length ? JSON.stringify([
-      idFor(records[0]), idFor(records[records.length - 1]), records.length]) : null;
+    const fingerprint = records.length ? JSON.stringify([records[0]?.remoteJid ?? records[0]?.key?.remoteJid,
+      records[records.length - 1]?.remoteJid ?? records[records.length - 1]?.key?.remoteJid, records.length]) : null;
     if (page > 1 && fingerprint && fingerprint === previousFingerprint) break;
     previousFingerprint = fingerprint;
     for (const record of records) {
       if (await onRecord(record)) count++;
       else skipped++;
     }
-    if (!records.length || (pages && page >= pages)) {
+    // Evolution 2.3.x may return the entire contact book as a flat array,
+    // ignoring page/offset. Do not refetch the same 4,900 records.
+    if (!records.length || (kind === 'contacts' && Array.isArray(response) && records.length > CONTACT_PAGE_SIZE) ||
+        (pages && page >= pages) || (!pages && records.length < CONTACT_PAGE_SIZE)) {
       complete = true; break;
     }
   }
@@ -104,7 +112,7 @@ async function importContactsAndChats(orgId, integrationId, job) {
   const contacts = await readAll(api, 'findContacts', 'contacts', async record => {
     const identity = contactIdentity(record);
     if (!identity) return false;
-    await storeContact({ orgId, ...identity, cache });
+    await storeContact({ orgId, integrationId, ...identity, cache });
     mark(job, { contacts: job.contacts + 1 });
     return true;
   });
@@ -112,7 +120,7 @@ async function importContactsAndChats(orgId, integrationId, job) {
   const chats = await readAll(api, 'findChats', 'chats', async record => {
     const identity = contactIdentity(record);
     if (!identity) return false;
-    const contact = await storeContact({ orgId, ...identity, cache });
+    const contact = await storeContact({ orgId, integrationId, ...identity, cache });
     await withConversationIdentityLock({ orgId, integrationId, phone: identity.phone }, async () => {
       const { conversation, created } = await getOrCreateConversation(prisma, {
         orgId, contactId: contact.id, integrationId, channel: 'whatsapp',

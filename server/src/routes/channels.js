@@ -7,13 +7,13 @@ import { HttpError, wrap } from '../http.js';
 import { encrypt, providerUrl, providerFetch } from './integrations-restore.js';
 import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus } from '../services/evolution.js';
 import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
-import { visibleChannelIds } from '../services/channel-access.js';
-import { queueEvolutionBootstrap, getEvolutionBootstrapStatus } from '../services/evolution-sync.js';
+import { visibleChannelIds, inboxChannelIds } from '../services/channel-access.js';
+import { getEvolutionBootstrapStatus, queueEvolutionBootstrap } from '../services/evolution-sync.js';
 const id=z.string().uuid();
 const checkAdmin=req=>{if(!isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar acessos a numeros.');};
 const checkOwnAccess=req=>{if(req.user?.global_role==='dev')throw new HttpError(403,'DEV nao conecta WhatsApp. Use Administracao DEV para cadastrar instancias para usuarios.');if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
 const checkChannel=async(req,channelId)=>{const row=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});if(!row||(!isMaster(req)&&row.config?.owner_user_id!==req.user.id))throw new HttpError(404,'Numero nao encontrado ou sem acesso.');return row;};
-function safe(row){return {owner_user_id:row.config?.owner_user_id??null,id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
+function safe(row){return {owner_user_id:row.config?.owner_user_id??null,owner_name:row.owner_name??null,id:row.id,name:row.name,status:row.status,type:row.type,instance_name:row.config?.instance_name??null,provider:row.config?.provider??'meta',provider_url:row.config?.provider_url??null,team_ids:Array.isArray(row.config?.team_ids)?row.config.team_ids:[],display_phone_number:row.config?.display_phone_number??null};}
 function webhookEndpoint(){
  const root=process.env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim().replace(/\/$/,'');
  const secret=process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
@@ -23,19 +23,22 @@ function webhookEndpoint(){
 export function channelsRouter(){
  const router=Router();
  router.get('/',wrap(async(req,res)=>{
-  const ids=await visibleChannelIds(req);
+  const ids=req.query.inbox==='1'?await inboxChannelIds(req):await visibleChannelIds(req);
   const rows=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp',id:{in:ids}},orderBy:{created_at:'asc'}});
+  const ownerIds=[...new Set(rows.map(r=>r.config?.owner_user_id).filter(Boolean))];
+  const profiles=ownerIds.length?await prisma.userProfile.findMany({where:{user_id:{in:ownerIds}},select:{user_id:true,full_name:true}}):[];
+  const ownerNames=new Map(profiles.map(p=>[p.user_id,p.full_name]));
   // Show the real Evolution state, not a cached status changed only in MySQL.
   const data=await Promise.all(rows.map(async row=>{
-    if(row.config?.provider!=='evolution_api')return safe(row);
+    const display={...safe(row),owner_name:ownerNames.get(row.config?.owner_user_id)??null,
+      contact_sync:row.config?.provider==='evolution_api'?getEvolutionBootstrapStatus(req.orgId,row.id):undefined};
+    if(row.config?.provider!=='evolution_api')return display;
     try{
       const state=await syncEvolutionStatus(req.orgId,row.id);
-      if (state?.status === 'connected') queueEvolutionBootstrap({ orgId: req.orgId, integrationId: row.id });
-      return {...safe(row),status:state?.status??row.status,status_error:null,
-        contact_sync: getEvolutionBootstrapStatus(req.orgId, row.id)};
+      return {...display,status:state?.status??row.status,status_error:null};
     }catch(error){
       console.warn('[Channels] Falha ao consultar estado:',{id:row.id,error:error.message});
-      return {...safe(row),status_error:'Nao foi possivel consultar a Evolution agora.'};
+      return {...display,status_error:'Nao foi possivel consultar a Evolution agora.'};
     }
   }));
   res.json({data});
@@ -66,18 +69,42 @@ export function channelsRouter(){
   catch(error){webhook={ok:false,error:String(error.message).slice(0,200)};console.warn('[Channels] Webhook nao configurado:',{instance:data.instance_name,error:error.message});}
   res.status(201).json({channel:safe(integration),webhook});
  }));
- router.get('/:id/contact-sync',wrap(async(req,res)=>{
+ // Delete only the local integration registration. Preserve conversations and messages.
+ // Separate from logout (disconnect) and from deleting the remote Evolution instance.
+ router.delete('/:id',wrap(async(req,res)=>{
+  if (!['dev','master','administrador'].includes(req.role) || !can(req,'channels.delete'))
+    throw new HttpError(403,'Sem permissão para remover instâncias.');
   const integrationId=id.parse(req.params.id);
-  await checkChannel(req,integrationId);
-  res.json({sync:getEvolutionBootstrapStatus(req.orgId,integrationId)});
+  const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
+  if(!row)throw new HttpError(404,'Instância não encontrada.');
+  if (['queued','running'].includes(getEvolutionBootstrapStatus(req.orgId,integrationId).status))
+    throw new HttpError(409,'Sincronização em andamento. Aguarde a conclusão antes de remover a instância.');
+  const confirmation=z.object({confirm_instance:z.string().min(1)}).strict().parse(req.body);
+  const expected=String(row.config?.instance_name || row.name);
+  if(confirmation.confirm_instance !== expected)throw new HttpError(400,'Confirmação da instância incorreta.');
+  const historicalConversations=await prisma.$transaction(async tx=>{
+    // No physical foreign key: retain original integration_id on historical conversations.
+    // Credentials and contact-instance associations cascade from the removed integration.
+    const count=await tx.conversation.count({where:{org_id:req.orgId,integration_id:integrationId}});
+    await tx.auditLog.create({data:{id:randomUUID(),org_id:req.orgId,user_id:req.user.id,
+      action:'whatsapp.instance_removed',entity_type:'integration',entity_id:integrationId,
+      details:{instance_name:expected,display_name:row.name,historical_conversations:count,removed_from:'panel'}}});
+    await tx.integration.delete({where:{id:integrationId}});
+    return count;
+  });
+  res.json({deleted:true,historical_conversations:historicalConversations});
  }));
- router.post('/:id/contact-sync',wrap(async(req,res)=>{
-  const integrationId=id.parse(req.params.id);
-  const row=await checkChannel(req,integrationId);
-  if(row.config?.provider!=='evolution_api')throw new HttpError(400,'Sincronizacao disponivel somente para Evolution.');
-  const state=await syncEvolutionStatus(req.orgId,integrationId);
-  if(state?.status!=='connected')throw new HttpError(409,'Conecte o WhatsApp primeiro.');
-  res.status(202).json({sync:queueEvolutionBootstrap({orgId:req.orgId,integrationId,force:true})});
+ router.get('/:id/sync-contacts',wrap(async(req,res)=>{
+  const channelId=id.parse(req.params.id);
+  if(!(await inboxChannelIds(req)).includes(channelId))throw new HttpError(404,'Instância sem acesso.');
+  res.json(getEvolutionBootstrapStatus(req.orgId,channelId));
+ }));
+ router.post('/:id/sync-contacts',wrap(async(req,res)=>{
+  const channelId=id.parse(req.params.id);
+  if(!(await inboxChannelIds(req)).includes(channelId))throw new HttpError(404,'Instância sem acesso.');
+  const channel=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});
+  if(channel?.config?.provider!=='evolution_api')throw new HttpError(404,'Instância Evolution não encontrada.');
+  res.status(202).json(queueEvolutionBootstrap({orgId:req.orgId,integrationId:channelId,force:true}));
  }));
  router.post('/:id/qr',wrap(async(req,res)=>{
   checkOwnAccess(req);const integrationId=id.parse(req.params.id);

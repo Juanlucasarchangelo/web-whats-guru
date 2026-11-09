@@ -4,12 +4,12 @@ import { Modal } from '@/components/ui/Modal';
 import { toastError, toastSuccess } from '@/components/ui/Toast';
 import {
   AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Link2, Loader2,
-  Plus, QrCode, RefreshCw, Settings2, ShieldCheck, Smartphone, Unplug,
+  Plus, QrCode, RefreshCw, Settings2, ShieldCheck, Smartphone, Unplug, Trash2,
 } from 'lucide-react';
 
 type Channel = {
   id: string; name: string; instance_name: string | null; provider_url: string | null;
-  status: string; status_error?: string | null; team_ids: string[];
+  status: string; status_error?: string | null; team_ids: string[]; owner_name?: string | null; owner_user_id?: string | null;
   provider: string; display_phone_number?: string | null;
 };
 type WebhookInfo = { enabled: boolean; has_url: boolean; messages_upsert: boolean; events: string[] };
@@ -27,7 +27,7 @@ function ChannelStatus({ channel }: { channel: Channel }) {
   return <span className="badge badge-gray"><Unplug size={12} /> Desconectado</span>;
 }
 
-export function ChannelsPanel({ canManage = true, canConnect = false, onChannelsChanged }: { canManage?: boolean; canConnect?: boolean; onChannelsChanged?: () => void }) {
+export function ChannelsPanel({ canManage = true, canConnect = false, canDelete = false, ownOnly = false, onChannelsChanged }: { canManage?: boolean; canConnect?: boolean; canDelete?: boolean; ownOnly?: boolean; onChannelsChanged?: () => void }) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,13 +37,14 @@ export function ChannelsPanel({ canManage = true, canConnect = false, onChannels
   const [qrData, setQrData] = useState<QRResponse | null>(null);
   const [qrError, setQrError] = useState('');
   const [webhooks, setWebhooks] = useState<Record<string, WebhookInfo | null>>({});
+  const [syncJobs, setSyncJobs] = useState<Record<string, {status:string;contacts?:number;chats?:number;error?:string;partial?:boolean}>>({});
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
   const [names, setNames] = useState<Record<string, string>>({});
   const [form, setForm] = useState({ name: '', provider_url: 'http://127.0.0.1:8080', instance_name: '', api_key: '' });
 
   const load = useCallback(async () => {
     try {
-      const result = await apiRequest<{ data: Channel[] }>('/channels');
+      const result = await apiRequest<{ data: Channel[] }>(ownOnly ? '/channels?inbox=1' : '/channels');
       setChannels((result.data || []).filter(channel => channel.provider === 'evolution_api'));
       onChannelsChanged?.();
     } catch (error) {
@@ -51,8 +52,24 @@ export function ChannelsPanel({ canManage = true, canConnect = false, onChannels
     } finally {
       setLoading(false);
     }
-  }, [onChannelsChanged]);
+  }, [onChannelsChanged, ownOnly]);
   useEffect(() => { void load(); }, [load]);
+
+  // Show real import progress; never claim all contacts synced until the job finishes.
+  useEffect(() => {
+    const active = Object.entries(syncJobs).filter(([,job])=>['queued','running'].includes(job.status)).map(([id])=>id);
+    if(!active.length)return;
+    let cancelled=false;
+    const interval=window.setInterval(async()=>{
+      await Promise.all(active.map(async id=>{
+        try {
+          const job=await apiRequest<{status:string;contacts?:number;chats?:number;error?:string;partial?:boolean}>(`/channels/${id}/sync-contacts`);
+          if(!cancelled)setSyncJobs(previous=>({...previous,[id]:job}));
+        }catch{ /* retry at next poll */ }
+      }));
+    },5000);
+    return ()=>{cancelled=true;window.clearInterval(interval);};
+  },[syncJobs]);
 
   async function checkStatus(channel: Channel) {
     setBusyId(channel.id);
@@ -158,6 +175,29 @@ export function ChannelsPanel({ canManage = true, canConnect = false, onChannels
     finally { setBusyId(null); }
   }
 
+  async function syncContacts(channel: Channel) {
+    setBusyId(channel.id);
+    try {
+      const response=await apiRequest<{status:string;contacts?:number}>(`/channels/${channel.id}/sync-contacts`,{method:'POST'});
+      setSyncJobs(previous=>({...previous,[channel.id]:response}));
+      toastSuccess('Sincronização de contatos iniciada.');
+    } catch(error) {toastError(error instanceof Error ? error.message : 'Não foi possível iniciar a sincronização.');}
+    finally {setBusyId(null);}
+  }
+
+  async function removeInstance(channel: Channel) {
+    const confirmation = channel.instance_name || channel.name;
+    if (!window.confirm(`Remover a instância “${displayName(channel)}” do FalaComigo?\n\nEla desaparecerá do painel e o histórico de conversas será preservado. Essa ação NÃO exclui a instância diretamente do servidor Evolution.`)) return;
+    setBusyId(channel.id);
+    try {
+      await apiRequest(`/channels/${channel.id}`, {method:'DELETE',body:JSON.stringify({confirm_instance:confirmation})});
+      setExpanded(null);
+      await load();
+      toastSuccess('Instância removida do painel; histórico preservado.');
+    } catch(error) {toastError(error instanceof Error ? error.message : 'Não foi possível remover a instância.');}
+    finally {setBusyId(null);}
+  }
+
   async function disconnect(channel: Channel) {
     if (!channel.instance_name || !window.confirm(
       `Desconectar somente “${displayName(channel)}” (${channel.instance_name}) do WhatsApp?\n\nO histórico no Whats-Guru será mantido. Para voltar a usar este número, será necessário escanear outro QR Code.`
@@ -224,6 +264,17 @@ export function ChannelsPanel({ canManage = true, canConnect = false, onChannels
               {canManage && <button className="btn-secondary text-xs mt-2" disabled={busyId === channel.id} onClick={() => void repairWebhook(channel)}><Link2 size={14} /> Reconfigurar recebimento</button>}
             </div>
           </div>
+          <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-slate-500">Sincronize a agenda completa da Evolution, inclusive contatos sem conversas.</p>
+            <div className="flex flex-wrap gap-2 items-center">
+              {syncJobs[channel.id] && <span className="text-xs text-slate-600">{syncJobs[channel.id].status==='done'?'Concluído':syncJobs[channel.id].status==='error'?'Falha':syncJobs[channel.id].status==='running'?'Sincronizando…':'Na fila'} · {syncJobs[channel.id].contacts??0} contatos {syncJobs[channel.id].partial?'(parcial)':''} {syncJobs[channel.id].error||''}</span>}
+              <button type="button" className="btn-secondary text-xs" disabled={busyId===channel.id || ['queued','running'].includes(syncJobs[channel.id]?.status||'')} onClick={()=>void syncContacts(channel)}><RefreshCw size={14}/> Sincronizar contatos</button>
+            </div>
+          </div>
+          {canDelete && <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-slate-500">Remove o cadastro da instância, mas mantém conversas e mensagens. Não apaga a instância no servidor Evolution.</p>
+            <button type="button" className="btn-secondary text-xs text-red-700" disabled={busyId === channel.id} onClick={() => void removeInstance(channel)}><Trash2 size={14}/> Excluir instância do painel</button>
+          </div>}
           {canManage && <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-slate-500">O histórico das conversas permanece no Whats-Guru mesmo após desconectar.</p>
             <button className="btn-secondary text-xs text-red-700" disabled={busyId === channel.id || channel.status === 'disconnected'} onClick={() => void disconnect(channel)}><Unplug size={14}/> Desconectar este WhatsApp</button>

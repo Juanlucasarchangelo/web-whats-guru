@@ -21,6 +21,9 @@ export function CrmPage() {
  const [search,setSearch] = useState('');
  const [view,setView] = useState<'kanban'|'list'>('kanban');
  const [tagFilter,setTagFilter] = useState('all');
+ const [instanceFilter,setInstanceFilter] = useState('all');
+ const [channels,setChannels] = useState<{id:string;name:string;instance_name:string|null}[]>([]);
+ const [contactInstances,setContactInstances] = useState<Record<string,string[]>>({});
  const [draggedColumn,setDraggedColumn] = useState<string|null>(null);
  const [columnOver,setColumnOver] = useState<string|null>(null);
  const [sortingColumns,setSortingColumns] = useState(false);
@@ -43,18 +46,29 @@ export function CrmPage() {
   if(!currentOrg?.id)return;
   if(!silent)setLoading(true);
   try {
-   const [cs,ts,ls] = await Promise.all([
-    supabase.from('contacts').select('*').eq('org_id',currentOrg.id).order('updated_at',{ascending:false}),
-    supabase.from('tags').select('*').eq('org_id',currentOrg.id).order('created_at',{ascending:true}),
-    supabase.from('contact_tags').select('*').limit(1000),
-   ]);
-   if(cs.error)throw cs.error;if(ts.error)throw ts.error;if(ls.error)throw ls.error;
-   setContacts((cs.data||[]) as Contact[]);setTags(((ts.data||[]) as Tag[]).sort((a,b)=>{
+   const ts=await supabase.from('tags').select('*').eq('org_id',currentOrg.id).order('created_at',{ascending:true});
+   if(ts.error)throw ts.error;
+   const all: Contact[] = [];
+   const lookup: Record<string,string[]> = {};
+   const allLinks: Link[] = [];
+   for (let lookupPage=1; lookupPage<=200; lookupPage++) {
+     const response=await apiRequest<{data: Array<Contact & {integration_ids?:string[];tag_ids?:string[]}>;total:number}>(`/contacts?limit=250&page=${lookupPage}`);
+     for(const c of response.data) {
+       all.push(c);
+       lookup[c.id]=c.integration_ids ?? [];
+       for(const tag_id of c.tag_ids ?? [])allLinks.push({contact_id:c.id,tag_id});
+     }
+     if(lookupPage*250>=response.total||response.data.length===0)break;
+   }
+   const channelResponse=await apiRequest<{data: typeof channels}>('/channels');
+   setChannels(channelResponse.data ?? []);
+   setContactInstances(lookup);
+   setContacts(all);setTags(((ts.data||[]) as Tag[]).sort((a,b)=>{
     const ap=(a as Tag & {sort_order?:number|null}).sort_order; const bp=(b as Tag & {sort_order?:number|null}).sort_order;
     if(ap!=null&&bp!=null&&ap!==bp)return ap-bp;
     if(ap!=null&&bp==null)return -1;if(ap==null&&bp!=null)return 1;
     return a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id);
-   }));setLinks((ls.data||[]) as Link[]);
+   }));setLinks(allLinks);
   } catch(e) {toastError(e instanceof Error?e.message:'Erro ao carregar etiquetas e CRM');}
   finally{setLoading(false);}
  },[currentOrg?.id]);
@@ -62,11 +76,11 @@ export function CrmPage() {
  // Refresh on return from Inbox, and while the Kanban is visible so automation changes appear.
  useEffect(()=>{const onFocus=()=>void load(true);const onVisible=()=>{if(!document.hidden)void load(true);};
   window.addEventListener('focus',onFocus);document.addEventListener('visibilitychange',onVisible);
-  const interval=window.setInterval(()=>{if(!document.hidden)void load(true);},15000);
+  const interval=window.setInterval(()=>{if(!document.hidden)void load(true);},120000);
   return ()=>{window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);window.clearInterval(interval);};
  },[load]);
  const idsOf=useCallback((id:string)=>links.filter(l=>l.contact_id===id).map(l=>l.tag_id),[links]);
- const filtered=useMemo(()=>contacts.filter(c=>`${c.name} ${c.email||''} ${c.phone||''}`.toLowerCase().includes(search.toLowerCase()) && (tagFilter==='all'||(tagFilter==='none'?idsOf(c.id).length===0:idsOf(c.id).includes(tagFilter)))),[contacts,search,tagFilter,idsOf]);
+ const filtered=useMemo(()=>contacts.filter(c=>`${c.name} ${c.email||''} ${c.phone||''}`.toLowerCase().includes(search.toLowerCase()) && (instanceFilter==='all'||(contactInstances[c.id]||[]).includes(instanceFilter)) && (tagFilter==='all'||(tagFilter==='none'?idsOf(c.id).length===0:idsOf(c.id).includes(tagFilter)))),[contacts,search,tagFilter,idsOf,instanceFilter,contactInstances]);
  const total=filtered.reduce((sum,c)=>sum+Number(c.crm_value||0),0);
  async function putTag(contactId:string,tagId:string){const {error}=await supabase.from('contact_tags').insert({contact_id:contactId,tag_id:tagId});if(error)throw error;}
  async function removeTag(contactId:string,tagId:string){const {error}=await supabase.from('contact_tags').delete().eq('contact_id',contactId).eq('tag_id',tagId);if(error)throw error;}
@@ -133,6 +147,7 @@ export function CrmPage() {
    </div>
    <div className="flex flex-wrap items-center gap-2">
     <div className="flex gap-2 items-center bg-white border border-slate-200 rounded-lg px-3 min-w-[180px]"><Search size={17} className="text-slate-400"/><input className="py-2.5 outline-none flex-1 min-w-0 text-sm" placeholder="Buscar contato" value={search} onChange={e=>setSearch(e.target.value)}/></div>
+    {view==='list' && <select className="input text-sm w-auto max-w-[250px]" aria-label="Separar por instância" value={instanceFilter} onChange={e=>setInstanceFilter(e.target.value)}><option value="all">Todas as instâncias</option>{channels.map(c=><option key={c.id} value={c.id}>{c.name} · {c.instance_name || 'WhatsApp'}</option>)}</select>}
     <select className="input text-sm w-auto max-w-[220px]" aria-label="Filtrar por etiqueta" value={tagFilter} onChange={e=>setTagFilter(e.target.value)}><option value="all">Todas as etiquetas</option>{view==='list'&&<option value="none">Sem etiqueta</option>}{tags.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select>
    </div>
   </div>
@@ -141,7 +156,7 @@ export function CrmPage() {
    <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white">
     <table className="w-full min-w-[780px] border-collapse text-left text-sm">
      <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3 font-semibold">Contato</th><th className="px-3 py-3 font-semibold">Telefone</th><th className="px-3 py-3 w-[210px] font-semibold">Etiquetas</th><th className="px-3 py-3 text-right font-semibold">Valor</th><th className="px-4 py-3 w-[100px] text-right font-semibold">Ações</th></tr></thead>
-     <tbody className="divide-y divide-slate-100">{filtered.map(c=>{const contactTags=tags.filter(t=>idsOf(c.id).includes(t.id));return <tr key={c.id} className="hover:bg-blue-50/50 cursor-pointer" onClick={()=>setChatContact(c)} title="Abrir conversa">
+     <tbody className="divide-y divide-slate-100">{[...filtered].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{sensitivity:'base'})).map(c=>{const contactTags=tags.filter(t=>idsOf(c.id).includes(t.id));return <tr key={c.id} className="hover:bg-blue-50/50 cursor-pointer" onClick={()=>setChatContact(c)} title="Abrir conversa">
       <td className="px-4 py-2.5"><div className="font-medium text-slate-900 truncate max-w-[290px]">{c.name}</div>{c.email&&<div className="text-xs text-slate-400 truncate max-w-[290px]">{c.email}</div>}</td>
       <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{c.phone||'—'}</td>
       <td className="px-3 py-2.5"><div className="flex max-w-[200px] flex-nowrap items-center gap-1 overflow-hidden" title={contactTags.map(t=>t.name).join(', ')}>{contactTags.length?contactTags.slice(0,2).map(t=><span key={t.id} className="inline-flex max-w-[92px] shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{borderColor:`${t.color}66`,backgroundColor:`${t.color}12`,color:t.color}}><span className="truncate">{t.name}</span></span>):<span className="text-xs text-slate-400">Sem etiqueta</span>}{contactTags.length>2&&<span className="shrink-0 text-xs font-semibold text-slate-500">+{contactTags.length-2}</span>}</div></td>

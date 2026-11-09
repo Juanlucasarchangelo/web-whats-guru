@@ -9,7 +9,7 @@ import { localFields } from './local-fields.js';
 import { prisma } from '../db.js';
 import { publicLocation } from '../services/evolution-media.js';
 import { HttpError, wrap } from '../http.js';
-import { conversationScope, requireConversation, requireAssigneeForChannel, admin } from '../services/channel-access.js';
+import { conversationScope, requireConversation, requireAssigneeForChannel, admin, visibleChannelIds } from '../services/channel-access.js';
 import { processTagAdded } from '../services/workflow-engine.js';
 
 const MODELS = {
@@ -64,11 +64,20 @@ function safeFilters(table, items) {
 async function scopedWhere(req, table, filters, tx = prisma) {
   const query = safeFilters(table, filters);
   if (Object.hasOwn(fields[table], 'org_id')) {
-    if (admin(req)) return { ...query, org_id: req.orgId };
+    // Mesmo Administrador so pode consultar conversas e mensagens dos proprios canais.
+    // Nunca use o escopo geral de administrador para conversas/mensagens.
     if(table==='conversations') return {AND:[{...query,org_id:req.orgId},await conversationScope(req,tx)]};
     if(table==='messages'||table==='internal_notes') {
-      const ids=(await tx.conversation.findMany({where:await conversationScope(req,tx),select:{id:true}})).map(r=>r.id);
-      return {...query,org_id:req.orgId,conversation_id:{in:ids}};
+      return {AND:[{...query,org_id:req.orgId},{conversations:await conversationScope(req,tx)}]};
+    }
+    if (admin(req)) return { ...query, org_id: req.orgId };
+    if(table==='contacts') {
+      const ids=await visibleChannelIds(req,tx);
+      return {AND:[{...query,org_id:req.orgId},{OR:[
+        {created_by_user_id:req.user.id},
+        {contact_integrations:{some:{org_id:req.orgId,integration_id:{in:ids}}}},
+        {conversations:{some:{org_id:req.orgId,integration_id:{in:ids}}}},
+      ]}]};
     }
     return {...query,org_id:req.orgId};
   }
@@ -81,7 +90,9 @@ async function scopedWhere(req, table, filters, tx = prisma) {
   if (table === 'org_members') return { ...query, org_id: req.orgId };
   if (table === 'contact_tags' || table === 'conversation_tags' || table === 'campaign_recipients') {
     const [foreign, foreignModel] = JOINS[table];
-    const ids = (await tx[foreignModel].findMany({ where: table==='conversation_tags'?await conversationScope(req,tx):{ org_id: req.orgId }, select: { id: true }, take: 5000 })).map(r => r.id);
+    const relatedWhere = table==='conversation_tags' ? await conversationScope(req,tx) :
+      (table==='contact_tags' && !admin(req)) ? await scopedWhere(req,'contacts',[],tx) : {org_id:req.orgId};
+    const ids = (await tx[foreignModel].findMany({ where: relatedWhere, select: {id:true} })).map(r=>r.id);
     const requested = query[foreign];
     const authorized = Array.isArray(requested?.in) ? ids.filter(id => requested.in.includes(id)) : requested && typeof requested === 'string' ? ids.filter(id => id === requested) : ids;
     return { ...query, [foreign]: { in: authorized } };
@@ -235,7 +246,7 @@ export function localDataRouter() {
           if (Object.hasOwn(fields[table], 'org_id')) data.org_id = req.orgId;
           if (Object.hasOwn(fields[table], 'created_by')) data.created_by = req.user.id;
           if (table === 'internal_notes') data.author_id = req.user.id;
-          if (table === 'contacts' && data.custom_fields === undefined) data.custom_fields = {};
+          if (table === 'contacts') { data.created_by_user_id = req.user.id; if (data.custom_fields === undefined) data.custom_fields = {}; }
           if (table === 'contact_tags' || table === 'conversation_tags') {
             // A etiqueta pertence ao contato; as conversas apenas espelham a classificacao.
             const contactId = table === 'contact_tags' ? data.contact_id :

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { REGIONS, REGION_CODES, matchesLegacyRegion } from '../src/services/regions.js';
-import { admin, channelAdmin, allowedChannelIds, conversationVisibility } from '../src/services/channel-scope-policy.js';
+import { admin, allowedChannelIds, conversationVisibility } from '../src/services/channel-scope-policy.js';
 
 test('cadastro regional permite somente as seis empresas conhecidas', () => {
   assert.deepEqual(REGION_CODES, ['sao_paulo','rio_de_janeiro','brasilia','curitiba','estados_unidos','dubai']);
@@ -23,19 +23,14 @@ test('Master e DEV enxergam os números da empresa; membro somente seu próprio 
   const dev={orgId:'empresa-1',role:'dev',user:{id:'dev'}};
   assert.equal(admin(alice),false);
   assert.equal(admin(administrador),true);
-  assert.equal(channelAdmin(administrador),false);
-  assert.equal(channelAdmin(master),true);
-  assert.equal(channelAdmin(dev),true);
   assert.deepEqual(allowedChannelIds(alice,channels),['whatsapp-a']);
   assert.deepEqual(allowedChannelIds(master,channels),['whatsapp-a','whatsapp-b','whatsapp-legacy']);
   assert.deepEqual(allowedChannelIds(dev,channels),['whatsapp-a','whatsapp-b','whatsapp-legacy']);
-  assert.deepEqual(allowedChannelIds(administrador,channels),[]);
-  const adminWithOwnChannel={...administrador,user:{id:'alice'}};
-  assert.deepEqual(allowedChannelIds(adminWithOwnChannel,channels),['whatsapp-a']);
+  assert.deepEqual(allowedChannelIds(administrador,channels),['whatsapp-a','whatsapp-b','whatsapp-legacy']);
   assert.deepEqual(conversationVisibility(alice,allowedChannelIds(alice,channels)),{
     org_id:'empresa-1',channel:'whatsapp',integration_id:{in:['whatsapp-a']}
   });
-  assert.deepEqual(conversationVisibility(master,[]),{org_id:'empresa-1'});
-  assert.deepEqual(conversationVisibility(administrador,[]),{org_id:'empresa-1'});
+  assert.deepEqual(conversationVisibility(master,allowedChannelIds(master,channels)),{org_id:'empresa-1',OR:[{channel:'whatsapp',integration_id:{in:['whatsapp-a','whatsapp-b','whatsapp-legacy']}},{channel:{not:'whatsapp'}}]});
+  assert.deepEqual(conversationVisibility(administrador,[]),{org_id:'empresa-1',OR:[{channel:'whatsapp',integration_id:{in:[]}},{channel:{not:'whatsapp'},assigned_to:'admin'}]});
   assert.deepEqual(conversationVisibility(alice,[]),{org_id:'empresa-1',channel:'whatsapp',integration_id:{in:[]}});
 });

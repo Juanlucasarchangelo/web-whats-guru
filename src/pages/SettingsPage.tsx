@@ -263,7 +263,7 @@ export function SettingsPage() {
       {activeTab === 'integrations' && (
         <div className="space-y-4">
           {isDev && <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">A conta DEV apenas monitora as integrações desta empresa. Para preparar uma integração para um usuário, abra Administração DEV → Integrações.</div>}
-          <ChannelsPanel canManage={can('settings.manage') && !isDev} />
+          <ChannelsPanel canManage={can('settings.manage') && !isDev} canDelete={can('channels.delete') && (isDev || ['master','administrador','owner','admin'].includes(currentMembership?.role ?? ''))} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));

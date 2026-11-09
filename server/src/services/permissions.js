@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   ['settings.manage','Configurar canais e integrações','Gestão'],
   ['campaigns.manage','Gerenciar campanhas e consentimentos','Gestão'],
   ['contacts.delete','Excluir contatos','Gestão'],
+  ['channels.delete','Remover instâncias do painel (preservar histórico)','Gestão'],
   ['roles.manage','Criar cargos e configurar permissões','Reservado ao Master'],
   ['members.assign_master','Criar ou atribuir Master','Reservado ao Master'],
 ].map(([key,label,group])=>({key,label,group}));

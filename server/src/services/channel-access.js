@@ -1,6 +1,6 @@
 import { prisma } from '../db.js';
 import { HttpError } from '../http.js';
-import { admin, allowedChannelIds, conversationVisibility } from './channel-scope-policy.js';
+import { admin, allowedChannelIds, inboxAccessibleChannelIds, conversationVisibility } from './channel-scope-policy.js';
 export { admin, ownedChannel } from './channel-scope-policy.js';
 
 // Master/DEV may inspect all channels in the selected organization; others only their own.
@@ -8,8 +8,12 @@ export async function visibleChannelIds(req,tx=prisma) {
   const channels=await tx.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'},select:{id:true,config:true}});
   return allowedChannelIds(req,channels);
 }
+export async function inboxChannelIds(req,tx=prisma) {
+  const channels=await tx.integration.findMany({where:{org_id:req.orgId,type:'whatsapp'},select:{id:true,config:true}});
+  return inboxAccessibleChannelIds(req,channels);
+}
 export async function conversationScope(req,tx=prisma) {
-  const ids=admin(req)?[]:await visibleChannelIds(req,tx);
+  const ids=await inboxChannelIds(req,tx);
   return conversationVisibility(req,ids);
 }
 export async function requireConversation(req,id,tx=prisma){

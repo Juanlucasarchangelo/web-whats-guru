@@ -18,6 +18,7 @@ import {
 
 import {
   visibleChannelIds,
+  inboxChannelIds,
   conversationScope,
   requireConversation,
   admin,
@@ -291,56 +292,46 @@ async function getConversationMedia({
 export function conversationsRouter() {
   const router = Router();
 
-  // Lista as conversas autorizadas.
+  // Inbox: pagina no banco e devolve os contatos junto com as conversas.
+  // Isso evita consultas IN com mais de 500 IDs que geravam "Desconhecido".
   router.get('/', wrap(async (req, res) => {
-    const limit = Math.min(
-      Math.max(
-        Number.parseInt(String(req.query.limit || 30), 10) || 30,
-        1
-      ),
-      100
-    );
-
+    const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || 100), 10) || 100, 1), 100);
+    const page = Math.min(Math.max(Number.parseInt(String(req.query.page || 1), 10) || 1, 1), 100000);
     const where = await conversationScope(req);
-    // Filtro por contato para abrir conversas do CRM sem limitar aos últimos 100 chats.
-    if (req.query.contact_id != null) {
-      where.contact_id = idParam.parse(String(req.query.contact_id));
+    const status = String(req.query.status || 'all');
+    const assignee = String(req.query.assignee || 'all');
+    const search = String(req.query.search || '').trim().slice(0, 120);
+    const channelId = req.query.integration_id ? idParam.parse(String(req.query.integration_id)) : null;
+    const tagId = req.query.tag_id ? idParam.parse(String(req.query.tag_id)) : null;
+    if (status !== 'all') {
+      if (!['open','pending','closed','resolved'].includes(status)) throw new HttpError(400,'Status invalido.');
+      where.status = status;
     }
-
-    const data = await prisma.conversation.findMany({
-      where,
-      take: limit,
-      orderBy: {
-        last_message_at: 'desc',
-      },
-    });
-
-    const contacts = data.length
-      ? await prisma.contact.findMany({
-        where: {
-          org_id: req.orgId,
-          id: {
-            in: data.map(c => c.contact_id),
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      })
-      : [];
-
-    const lookup = new Map(
-      contacts.map(contact => [contact.id, contact])
-    );
-
-    res.json({
-      data: data.map(c => ({
-        ...c,
-        contact: lookup.get(c.contact_id) || null,
-      })),
-    });
+    if (assignee === 'me') where.assigned_to = req.user.id;
+    else if (assignee === 'unassigned') where.assigned_to = null;
+    else if (assignee !== 'all') throw new HttpError(400,'Filtro de atendente invalido.');
+    if (channelId) {
+      if (!(await inboxChannelIds(req)).includes(channelId)) throw new HttpError(404,'Instancia nao encontrada ou sem acesso.');
+      where.integration_id = channelId;
+    }
+    if (tagId) where.conversation_tags = { some: { tag_id: tagId } };
+    if (search) where.contacts = { OR: [
+      { name: { contains: search } }, { phone: { contains: search } },
+    ] };
+    const [total, rows] = await Promise.all([
+      prisma.conversation.count({ where }),
+      prisma.conversation.findMany({ where, take: limit, skip: (page-1)*limit,
+        orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
+      }),
+    ]);
+    // Buscar os nomes no servidor, filtrando org_id e em lotes de ate 100.
+    // Nunca expor contatos de outra empresa se houver referencia historica incorreta.
+    const contacts = rows.length ? await prisma.contact.findMany({where:{
+      org_id:req.orgId,id:{in:rows.map(row=>row.contact_id)},
+    },select:{id:true,name:true,phone:true}}) : [];
+    const names = new Map(contacts.map(contact=>[contact.id,contact]));
+    const data = rows.map(row => ({...row,contact:names.get(row.contact_id)||null}));
+    res.json({ data, total, page, limit, has_more: page * limit < total });
   }));
 
   // Cria uma conversa.
@@ -368,7 +359,7 @@ export function conversationsRouter() {
     let integrationId = null;
 
     if (input.channel === 'whatsapp') {
-      const channels = await visibleChannelIds(req);
+      const channels = await inboxChannelIds(req);
 
       integrationId = input.integration_id ??
         (channels.length === 1 ? channels[0] : null);

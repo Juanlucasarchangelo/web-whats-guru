@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
 import { apiRequest } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
@@ -10,16 +11,23 @@ import { toastSuccess, toastError } from '@/components/ui/Toast';
 import type { Contact, Tag } from '@/types';
 import {
   Users, Search, Plus, Pencil, Trash2, Mail, Phone,
-  DollarSign, Building2,
+  Building2,
 } from 'lucide-react';
 
 type ContactTagLink = { contact_id: string; tag_id: string };
 
 export function ContactsPage() {
-  const { currentOrg } = useOrg();
+  const { currentOrg, currentMembership } = useOrg();
+  const { user } = useAuth();
+  const isManager = user?.global_role === 'dev' || ['master','administrador','owner','admin'].includes(currentMembership?.role ?? '');
   const orgId = currentOrg?.id;
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const contactsRequestVersion = useRef(0);
+  const pageSize = 50;
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [instanceFilter, setInstanceFilter] = useState('all');
+  const [channels, setChannels] = useState<{id:string;name:string;instance_name:string|null;owner_user_id:string|null;owner_name?:string|null}[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState('all');
@@ -36,36 +44,41 @@ export function ContactsPage() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    const requestVersion = ++contactsRequestVersion.current;
     if (!orgId) {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      // O backend define a organizacao a partir do token de login.
-      // A primeira etapa mostra ate 100 contatos; as buscas abaixo sao locais.
-      const response = await apiRequest<{ data: Contact[]; total: number }>('/contacts?limit=100');
+      const query = new URLSearchParams({page: String(page), limit: String(pageSize), q: search.trim(), tag: tagFilter});
+      if (instanceFilter.startsWith('user:')) query.set('owner_user_id', instanceFilter.slice(5));
+      else if (instanceFilter !== 'all') query.set('integration_id', instanceFilter);
+      const response = await apiRequest<{ data: Array<Contact & { tag_ids?: string[] }>; total: number }>(`/contacts?${query}`);
+      if (requestVersion !== contactsRequestVersion.current) return;
       setContacts(response.data.map((contact) => ({
         ...contact,
         crm_value: Number(contact.crm_value ?? 0),
         custom_fields: contact.custom_fields ?? {},
       })));
       setTotal(response.total);
+      setContactTags(response.data.flatMap(contact => (contact.tag_ids ?? []).map(tag_id => ({contact_id: contact.id,tag_id}))));
+      if (isManager) {
+        const channelsResponse = await apiRequest<{ data: typeof channels }>('/channels');
+        if (requestVersion !== contactsRequestVersion.current) return;
+        setChannels(channelsResponse.data ?? []);
+      }
       // Mesmas tabelas usadas pelo CRM Kanban e pela Caixa de Entrada.
-      const [tagsResult, linksResult] = await Promise.all([
-        supabase.from('tags').select('*').eq('org_id', orgId).order('name', { ascending: true }),
-        supabase.from('contact_tags').select('contact_id,tag_id').limit(1000),
-      ]);
+      const tagsResult = await supabase.from('tags').select('*').eq('org_id', orgId).order('name', { ascending: true });
       if (tagsResult.error) throw tagsResult.error;
-      if (linksResult.error) throw linksResult.error;
+      if (requestVersion !== contactsRequestVersion.current) return;
       setTags((tagsResult.data ?? []) as Tag[]);
-      setContactTags((linksResult.data ?? []) as ContactTagLink[]);
     } catch (error) {
-      toastError(error instanceof Error ? error.message : 'Erro ao carregar contatos do MySQL');
+      if (requestVersion === contactsRequestVersion.current) toastError(error instanceof Error ? error.message : 'Erro ao carregar contatos do MySQL');
     } finally {
-      setLoading(false);
+      if (requestVersion === contactsRequestVersion.current) setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, page, search, tagFilter, instanceFilter, isManager]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -149,10 +162,8 @@ export function ContactsPage() {
   }
 
   const idsOf = (contactId: string) => contactTags.filter(link => link.contact_id === contactId).map(link => link.tag_id);
-  const visibleContacts = contacts.filter((contact) =>
-    (tagFilter === 'all' || (tagFilter === 'none' ? idsOf(contact.id).length === 0 : idsOf(contact.id).includes(tagFilter)))
-    && contact.name.toLocaleLowerCase('pt-BR').includes(search.trim().toLocaleLowerCase('pt-BR')),
-  );
+  const visibleContacts = contacts;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -173,14 +184,14 @@ export function ContactsPage() {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Buscar por nome..."
             className="input pl-9"
           />
         </div>
         <select
           value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
+          onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
           className="input sm:w-48"
         >
           <option value="all">Todas as etiquetas</option>
@@ -189,12 +200,25 @@ export function ContactsPage() {
         </select>
       </div>
 
-      {total > contacts.length && !loading && (
-        <p className="mb-4 text-sm text-amber-700">
-          Mostrando os 100 contatos mais recentes. A busca nesta etapa considera esses 100 contatos.
-        </p>
-      )}
+      {isManager && <div className="mb-4 flex flex-wrap gap-3 items-center">
+        <label htmlFor="contacts-instance" className="text-sm font-medium">Instância / usuário responsável</label>
+        <select id="contacts-instance" className="input max-w-sm" value={instanceFilter} onChange={e => {setInstanceFilter(e.target.value);setPage(1);}}>
+          <option value="all">Todas as instâncias</option>
+          {[...new Set(channels.map(channel=>channel.owner_user_id||'unknown'))].map(ownerId=><optgroup key={ownerId} label={channels.find(c=>(c.owner_user_id||'unknown')===ownerId)?.owner_name || (ownerId==='unknown'?'Sem usuário atribuído':`Usuário ${ownerId.slice(0,8)}`)}>
+            {ownerId!=='unknown' && <option value={`user:${ownerId}`}>Todas as instâncias deste usuário</option>}
+            {channels.filter(c=>(c.owner_user_id||'unknown')===ownerId).map(channel=><option key={channel.id} value={channel.id}>{channel.name} · {channel.instance_name||'WhatsApp'}</option>)}
+          </optgroup>)}
+        </select>
+      </div>}
 
+      {!loading && <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+        <span>{total === 0 ? 'Nenhum contato' : `${(page-1)*pageSize+1}–${Math.min(page*pageSize,total)} de ${total} contatos`}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Página {page} de {totalPages}</span>
+          <button type="button" className="btn-secondary" disabled={page <= 1} onClick={()=>setPage(n=>n-1)}>Anterior</button>
+          <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={()=>setPage(n=>n+1)}>Próxima</button>
+        </div>
+      </div>}
       {loading ? (
         <div className="flex justify-center py-12"><Spinner size={32} /></div>
       ) : visibleContacts.length === 0 ? (
@@ -207,57 +231,65 @@ export function ContactsPage() {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {visibleContacts.map(contact => (
-            <div key={contact.id} className="card p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-base font-semibold text-slate-700">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="hidden lg:grid lg:grid-cols-12 gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span className="col-span-3">Contato</span>
+            <span className="col-span-2">Telefone</span>
+            <span className="col-span-3">E-mail</span>
+            <span className="col-span-2">Etiquetas</span>
+            <span className="col-span-2 text-right">Ações</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {visibleContacts.map(contact => (
+              <div key={contact.id} className="grid grid-cols-1 lg:grid-cols-12 gap-x-3 gap-y-2 px-4 py-3 hover:bg-slate-50 transition-colors items-center">
+                <div className="lg:col-span-3 min-w-0 flex items-center gap-3">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700">
                     {contact.name.charAt(0).toUpperCase()}
                   </div>
-                  <div>
-                    <p className="font-medium text-slate-900">{contact.name}</p>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {tags.filter(tag => idsOf(contact.id).includes(tag.id)).map(tag => (
-                        <span key={tag.id} className="badge badge-gray" style={{ borderColor: tag.color, color: tag.color }}>
-                          {tag.name}
-                        </span>
-                      ))}
-                      {idsOf(contact.id).length === 0 && <span className="text-xs text-slate-400">Sem etiqueta</span>}
-                    </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm text-slate-900 break-words">{contact.name}</p>
+                    {contact.custom_fields?.empresa ? (
+                      <p className="text-xs text-slate-500 truncate flex items-center gap-1"><Building2 size={12} /> {String(contact.custom_fields.empresa)}</p>
+                    ) : null}
+                    {contact.is_demo && <span className="text-xs text-slate-400">Contato demo</span>}
                   </div>
                 </div>
-                {contact.is_demo && <span className="badge badge-gray text-[10px]">Demo</span>}
+                <div className="lg:col-span-2 min-w-0 text-sm text-slate-600 flex items-center gap-2">
+                  <Phone size={14} className="text-slate-400 flex-shrink-0" />
+                  <span className="break-all">{contact.phone || '—'}</span>
+                </div>
+                <div className="lg:col-span-3 min-w-0 text-sm text-slate-600 flex items-center gap-2">
+                  <Mail size={14} className="text-slate-400 flex-shrink-0" />
+                  <span className="break-all">{contact.email || '—'}</span>
+                </div>
+                <div className="lg:col-span-2 min-w-0 flex flex-wrap gap-1">
+                  {tags.filter(tag => idsOf(contact.id).includes(tag.id)).map(tag => (
+                    <span key={tag.id} className="badge badge-gray" style={{ borderColor: tag.color, color: tag.color }}>
+                      {tag.name}
+                    </span>
+                  ))}
+                  {idsOf(contact.id).length === 0 && <span className="text-xs text-slate-400">Sem etiqueta</span>}
+                </div>
+                <div className="lg:col-span-2 flex items-center lg:justify-end gap-1">
+                  <button type="button" onClick={() => openEdit(contact)} className="btn-ghost text-xs px-2 py-1.5" aria-label={`Editar ${contact.name}`}>
+                    <Pencil size={14} /> Editar
+                  </button>
+                  <button type="button" onClick={() => { setDeleteTarget(contact); setShowConfirmDelete(true); }}
+                    className="btn-ghost text-xs px-2 py-1.5 text-red-600 hover:bg-red-50" aria-label={`Excluir ${contact.name}`}>
+                    <Trash2 size={14} /> Excluir
+                  </button>
+                </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              <div className="space-y-1.5 text-sm text-slate-600">
-                {contact.email && (
-                  <div className="flex items-center gap-2"><Mail size={14} className="text-slate-400" /> {contact.email}</div>
-                )}
-                {contact.phone && (
-                  <div className="flex items-center gap-2"><Phone size={14} className="text-slate-400" /> {contact.phone}</div>
-                )}
-                {Number(contact.crm_value) > 0 && (
-                  <div className="flex items-center gap-2"><DollarSign size={14} className="text-slate-400" /> {contact.crm_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                )}
-                {contact.custom_fields?.empresa ? (
-                  <div className="flex items-center gap-2"><Building2 size={14} className="text-slate-400" /> {String(contact.custom_fields.empresa)}</div>
-                ) : null}
-              </div>
-
-              <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-50">
-                <button onClick={() => openEdit(contact)} className="btn-ghost text-xs px-2 py-1.5">
-                  <Pencil size={14} /> Editar
-                </button>
-                <button
-                  onClick={() => { setDeleteTarget(contact); setShowConfirmDelete(true); }}
-                  className="btn-ghost text-xs px-2 py-1.5 text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 size={14} /> Excluir
-                </button>
-              </div>
-            </div>
-          ))}
+      {!loading && total > pageSize && (
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-600">
+          <span>Página {page} de {totalPages} · {total} contatos</span>
+          <button type="button" className="btn-secondary" disabled={page <= 1} onClick={() => {setPage(n => n - 1); window.scrollTo({top: 0, behavior: 'smooth'});}}>Anterior</button>
+          <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={() => {setPage(n => n + 1); window.scrollTo({top: 0, behavior: 'smooth'});}}>Próxima</button>
         </div>
       )}
 

@@ -14,10 +14,10 @@ import type { Conversation, Message, Tag, QuickReply, InternalNote, Contact } fr
 import {
   Search, Filter, Send, Paperclip, Bot, User, Plus, Users as UsersIcon, RefreshCw,
   Tag as TagIcon, StickyNote, Zap, CheckCheck, Check, Circle,
-  Inbox as InboxIcon, X, MoreVertical, UserCheck, Archive, MessageCircle, ArrowLeft,
+  Inbox as InboxIcon, X, MoreVertical, UserCheck, Archive, MessageCircle, ArrowLeft, ChevronDown,
 } from 'lucide-react';
 interface ImportStatus { status:string; contacts?:number; chats?:number; scanned?:number;
-  pages?:number; counts?:Record<string,number>; cutoff?:string; truncated?:boolean; partial?:boolean; error?:string; }
+  pages?:number; counts?:Record<string,number>; aliases?:number; alias_warning?:boolean; cutoff?:string; truncated?:boolean; partial?:boolean; error?:string; }
 interface ChannelInfo { id:string; name:string; instance_name:string|null; provider:string; status:string; contact_sync?:ImportStatus; }
 interface OrgMemberInfo {
   user_id: string;
@@ -34,11 +34,22 @@ export function InboxPage() {
   const showNumberFilter = isDev || isMaster;
   const [showMyWhatsApp,setShowMyWhatsApp] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [moreConversations, setMoreConversations] = useState(false);
+  const [conversationPage, setConversationPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [availableContacts, setAvailableContacts] = useState<Contact[]>([]);
+  const [contactPage, setContactPage] = useState(1);
+  const [moreAvailableContacts, setMoreAvailableContacts] = useState(false);
+  const [availableContactsTotal, setAvailableContactsTotal] = useState(0);
+  const [loadingAvailableContacts, setLoadingAvailableContacts] = useState(false);
+  const contactRequestVersion = useRef(0);
   const [newContactId, setNewContactId] = useState('');
   const [newContactQuery, setNewContactQuery] = useState('');
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const contactPickerRef = useRef<HTMLDivElement>(null);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
   const [channelFilter, setChannelFilter] = useState('all');
   const [newChannelId, setNewChannelId] = useState('');
   const [contactsMap, setContactsMap] = useState<Record<string, Contact>>({});
@@ -61,6 +72,7 @@ export function InboxPage() {
   const [suggestingAI, setSuggestingAI] = useState(false);
   const [whatsAppProvider, setWhatsAppProvider] = useState<'evolution_api' | 'meta' | 'unknown'>('unknown');
   const [syncing, setSyncing] = useState(false);
+  const [contactSyncRequesting, setContactSyncRequesting] = useState(false);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [conversationProvider, setConversationProvider] = useState<string | null>(null);
   const [syncRun, setSyncRun] = useState(0);
@@ -77,67 +89,51 @@ export function InboxPage() {
   const [noteInput, setNoteInput] = useState('');
   const [showConfirmClose, setShowConfirmClose] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const loadConversations = useCallback(async (silent = false) => {
+  // Listagem obtida exclusivamente da API autorizada, com contato incluído
+  // no resultado; sem consultas IN > 500 e sem depender do limite do adapter.
+  const loadConversations = useCallback(async (silent = false, page = 1) => {
     if (!orgId) return;
-    if (!silent) setLoading(true);
+    if (!silent && page === 1) setLoading(true);
+    if (page > 1) setLoadingMore(true);
     try {
-      let query = supabase
-        .from('conversations')
-        .select('*')
-        .eq('org_id', orgId)
-        .order('last_message_at', { ascending: false });
-      if (channelFilter !== 'all') query = query.eq('integration_id', channelFilter);
-      if (statusFilter !== 'all') query = query.eq('status', statusFilter);
-      if (assigneeFilter === 'me') query = query.eq('assigned_to', user!.id);
-      if (assigneeFilter === 'unassigned') query = query.is('assigned_to', null);
-      if (tagFilter !== 'all') {
-        const { data: ctData } = await supabase
-          .from('conversation_tags')
-          .select('conversation_id')
-          .eq('tag_id', tagFilter);
-        const convIds = (ctData ?? []).map((ct: any) => ct.conversation_id);
-        if (convIds.length === 0) {
-          setConversations([]);
-          setLoading(false);
-          return;
+      const query = new URLSearchParams({ limit: '100', page: String(page) });
+      if (channelFilter !== 'all') query.set('integration_id', channelFilter);
+      if (statusFilter !== 'all') query.set('status', statusFilter);
+      if (assigneeFilter !== 'all') query.set('assignee', assigneeFilter);
+      if (tagFilter !== 'all') query.set('tag_id', tagFilter);
+      if (search.trim()) query.set('search', search.trim());
+      const response = await apiRequest<{data:Array<Conversation & {contact:Contact|null}>;total:number;has_more:boolean}>(
+        `/conversations?${query.toString()}`);
+      const map: Record<string, Contact> = {};
+      const data = response.data.map(({contact, ...conversation}) => {
+        if (contact) map[contact.id] = contact;
+        return conversation as Conversation;
+      });
+      setContactsMap(previous => page === 1 && !silent ? map : {...previous,...map});
+      setConversations(previous => {
+        if (page === 1 && !silent) return data;
+        // Preserve older pages while refreshing first-page status/unread counts.
+        const updated = new Map<string,Conversation>();
+        if (page === 1) {
+          data.forEach(row => updated.set(row.id,row));
+          previous.forEach(row => { if (!updated.has(row.id)) updated.set(row.id,row); });
+        } else {
+          previous.forEach(row => updated.set(row.id,row));
+          data.forEach(row => updated.set(row.id,row));
         }
-        query = query.in('id', convIds);
-      }
-      const { data, error } = await query;
-      if (error) throw error;
-      let convList = (data ?? []) as Conversation[];
-
-      if (search.trim()) {
-        const contactIds = convList.map(c => c.contact_id);
-        if (contactIds.length > 0) {
-          const { data: contactsData } = await supabase
-            .from('contacts')
-            .select('*')
-            .in('id', contactIds)
-            .ilike('name', `%${search}%`);
-          const matchingIds = new Set((contactsData ?? []).map((c: Contact) => c.id));
-          convList = convList.filter(c => matchingIds.has(c.contact_id));
-        }
-      }
-      // Load contacts for all conversations
-      const allContactIds = convList.map(c => c.contact_id);
-      if (allContactIds.length > 0) {
-        const { data: contactsData } = await supabase
-          .from('contacts')
-          .select('*')
-          .in('id', allContactIds);
-        const map: Record<string, Contact> = {};
-        (contactsData ?? []).forEach((c: Contact) => { map[c.id] = c as Contact; });
-        setContactsMap(map);
-      }
-      setConversations(convList);
+        return [...updated.values()];
+      });
+      if (!silent || page > 1) setMoreConversations(response.has_more);
+      if (page > 1) setConversationPage(page);
+      else if (!silent) setConversationPage(1);
     } catch (err) {
-      if (silent) console.warn('[Inbox] Falha ao atualizar conversas:', err);
+      if (silent) console.warn('[Inbox] Falha ao atualizar conversas:',err);
       else toastError(err instanceof Error ? err.message : 'Erro ao carregar conversas');
     } finally {
-      if (!silent) setLoading(false);
+      if (page > 1) setLoadingMore(false);
+      if (!silent && page === 1) setLoading(false);
     }
-  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, channelFilter, user]);
+  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, channelFilter]);
   // Detecta o provedor da organizacao para mostrar opcoes compatíveis.
   useEffect(() => {
     if (!orgId) { setWhatsAppProvider('unknown'); return; }
@@ -159,13 +155,23 @@ export function InboxPage() {
   const refreshChannels=useCallback(async()=>{
     if(!orgId)return;
     try{
-      const r=await apiRequest<{data:ChannelInfo[]}>('/channels');
+      const r=await apiRequest<{data:ChannelInfo[]}>('/channels?inbox=1');
       setChannels(r.data??[]);
+      setChannelsLoaded(true);
       setNewChannelId(old => old && r.data?.some(c=>c.id===old) ? old : r.data?.length===1?r.data[0].id:'');
     }catch(err){console.warn('[Inbox] Números indisponíveis:',err);}
   },[orgId]);
-  useEffect(()=>{setChannelFilter('all');setSelectedConv(null);setChannels([]);},[orgId]);
+  useEffect(()=>{setChannelFilter('all');setSelectedConv(null);setChannels([]);setChannelsLoaded(false);},[orgId]);
   useEffect(()=>{void refreshChannels();},[refreshChannels]);
+  useEffect(() => {
+    // Do not keep conversations of removed/unauthorized WhatsApps on screen.
+    if (!orgId || !channels.length) return;
+    const allowed = new Set(channels.map(channel => channel.id));
+    setConversations(previous => previous.filter(conv => conv.channel !== 'whatsapp' ||
+      (!!conv.integration_id && allowed.has(conv.integration_id))));
+    setSelectedConv(previous => previous && previous.channel === 'whatsapp' &&
+      (!previous.integration_id || !allowed.has(previous.integration_id)) ? null : previous);
+  }, [orgId, channels]);
   const selectedChannel = channels.find(c=>c.id===selectedConv?.integration_id);
   const activeConversationProvider = selectedChannel?.provider ?? conversationProvider;
   // Administradores can view their company's chats without managing the other
@@ -180,16 +186,19 @@ export function InboxPage() {
       .catch(() => { if (active) setConversationProvider(null); });
     return () => { active = false; };
   }, [selectedConv?.id, selectedChannel?.provider]); // eslint-disable-line react-hooks/exhaustive-deps
-  const syncableChannel = channels.find(c => c.id === channelFilter && c.provider === 'evolution_api' && c.status === 'connected') ??
-    (channels.filter(c => c.provider === 'evolution_api' && c.status === 'connected').length === 1
-      ? channels.find(c => c.provider === 'evolution_api' && c.status === 'connected') : undefined);
+  const connectedEvolutionChannels = channels.filter(c => c.provider === 'evolution_api' && c.status === 'connected');
+  const syncableChannel = channelFilter !== 'all'
+    ? connectedEvolutionChannels.find(c => c.id === channelFilter)
+    : connectedEvolutionChannels.length === 1 ? connectedEvolutionChannels[0] : undefined;
   const manuallySyncContacts = async () => {
-    if (!syncableChannel) return;
+    if (!syncableChannel || contactSyncRequesting) return;
+    setContactSyncRequesting(true);
     try {
-      await apiRequest(`/channels/${syncableChannel.id}/contact-sync`, { method: 'POST' });
+      await apiRequest(`/channels/${syncableChannel.id}/sync-contacts`, { method: 'POST' });
       toastSuccess('Sincronização de contatos e chats solicitada');
       await refreshChannels();
     } catch (err) { toastError(err instanceof Error ? err.message : 'Falha ao atualizar contatos'); }
+    finally { setContactSyncRequesting(false); }
   };
 
   useEffect(() => {
@@ -223,7 +232,12 @@ export function InboxPage() {
     });
   }, [orgId]);
   useEffect(() => {
-    loadConversations();
+    setMoreConversations(false);
+    setConversationPage(1);
+    setConversations([]);
+    setContactsMap({});
+    setSelectedConv(null);
+    void loadConversations();
   }, [loadConversations]);
   // Load recent messages first; older messages can be retrieved by cursor.
   const loadMessages = useCallback(async (convId: string, silent = false) => {
@@ -310,8 +324,8 @@ export function InboxPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao sincronizar Evolution';
       if (activeConvRef.current === conversationId) setSyncInfo(`Falha na sincronização: ${message}`);
-      if (showToast) toastError(message);
-    } finally { syncInProgress.current.delete(conversationId); if (showToast) setSyncing(false); }
+      if (showToast) { setSyncing(false); toastError(message); }
+    } finally { syncInProgress.current.delete(conversationId); }
   }, []);
 
   useEffect(() => {
@@ -337,13 +351,16 @@ export function InboxPage() {
         } else {
           setSyncing(false);
           const imported = (state?.counts?.received || 0) + (state?.counts?.sent_from_phone || 0);
+          const existing = (state?.counts?.duplicate || 0) + (state?.counts?.already_sent_from_panel || 0);
           const count = state?.scanned || 0;
-          const ignored = Object.entries(state?.counts || {}).filter(([key, value]) => key.startsWith('ignored_') && value > 0)
+          const rejected = Object.entries(state?.counts || {}).filter(([key, value]) =>
+            key.startsWith('ignored_') && value > 0 && key !== 'ignored_out_of_period')
             .map(([key, value]) => `${key.replace('ignored_', '')}: ${value}`).join(', ');
+          const details = `Consultadas ${count} mensagens na Evolution; ${imported} novas, ${existing} já existentes.`;
           setSyncInfo(state?.status === 'error' ? `Falha na sincronização: ${state.error || 'erro desconhecido'}` :
-            state?.truncated ? 'Importação parcial: a Evolution repetiu páginas ou atingiu o limite de segurança.' :
-            count === 0 ? 'A Evolution não retornou mensagens armazenadas para esta conversa. Verifique o histórico disponível no Evolution Manager.' :
-            `Histórico verificado: ${count} mensagens consultadas; ${imported} importadas.${ignored ? ` Ignoradas (${ignored}).` : ''}`);
+            state?.truncated ? `${details} Importação parcial: paginação incompleta na Evolution.` :
+            count === 0 ? 'A Evolution não disponibilizou mensagens armazenadas para esta conversa. Confira o histórico salvo na Evolution.' :
+            `${details}${rejected ? ` Ignoradas (${rejected}).` : ''}${state?.alias_warning ? ' Alguns dados de associação de contatos não puderam ser consultados.' : ''}`);
           void loadMessages(convId, true); void loadConversations(true);
         }
       } catch (err) {
@@ -390,28 +407,77 @@ export function InboxPage() {
   }
 
   async function openNewConversation() {
+    const version = ++contactRequestVersion.current;
+    setContactPickerOpen(false);
+    setLoadingAvailableContacts(true);
     try {
-      const response = await apiRequest<{data:Contact[]}>('/contacts?limit=100');
-      setAvailableContacts(response.data);
-      setNewContactId(response.data[0]?.id || '');
+      const response = await apiRequest<{data:Contact[];total:number}>('/contacts?limit=100&page=1');
+      if (version !== contactRequestVersion.current) return;
+      setAvailableContacts(response.data ?? []);
+      setAvailableContactsTotal(response.total ?? response.data?.length ?? 0);
+      setNewContactId(response.data?.[0]?.id || '');
       setNewContactQuery('');
+      setContactPage(1);
+      setMoreAvailableContacts((response.data?.length ?? 0) < (response.total ?? 0));
       setCreatingConversation(true);
     } catch (err) { toastError(err instanceof Error ? err.message : 'Erro ao carregar contatos'); }
+    finally { if (version === contactRequestVersion.current) setLoadingAvailableContacts(false); }
   }
   useEffect(() => {
     if (!creatingConversation) return;
-    let live = true;
+    const version = ++contactRequestVersion.current;
     const timer = window.setTimeout(async () => {
+      setLoadingAvailableContacts(true);
       try {
         const query = encodeURIComponent(newContactQuery.trim());
-        const data = await apiRequest<{data:Contact[]}>(`/contacts?limit=100&q=${query}`);
-        if (!live) return;
-        setAvailableContacts(data.data ?? []);
-        setNewContactId(old => data.data?.some(x=>x.id===old) ? old : (data.data?.[0]?.id ?? ''));
-      } catch { /* Keep current contacts if search fails. */ }
+        const result = await apiRequest<{data:Contact[];total:number}>(`/contacts?limit=100&page=1&q=${query}`);
+        if (version !== contactRequestVersion.current) return;
+        setAvailableContacts(result.data ?? []);
+        setAvailableContactsTotal(result.total ?? result.data?.length ?? 0);
+        setContactPage(1);
+        setMoreAvailableContacts((result.data?.length ?? 0) < (result.total ?? 0));
+        setNewContactId(old => result.data?.some(x=>x.id===old) ? old : (result.data?.[0]?.id ?? ''));
+      } catch (err) {
+        if (version === contactRequestVersion.current) toastError(err instanceof Error ? err.message : 'Falha ao buscar contatos');
+      } finally { if (version === contactRequestVersion.current) setLoadingAvailableContacts(false); }
     }, 350);
-    return () => { live = false; window.clearTimeout(timer); };
+    return () => { window.clearTimeout(timer); };
   }, [creatingConversation, newContactQuery]);
+
+  async function loadMoreNewContacts() {
+    if (loadingAvailableContacts || !moreAvailableContacts) return;
+    const version = contactRequestVersion.current;
+    setLoadingAvailableContacts(true);
+    try {
+      const nextPage = contactPage + 1;
+      const q = encodeURIComponent(newContactQuery.trim());
+      const result = await apiRequest<{data:Contact[];total:number}>(`/contacts?limit=100&page=${nextPage}&q=${q}`);
+      if (version !== contactRequestVersion.current) return;
+      const seen = new Set(availableContacts.map(contact => contact.id));
+      const appended = (result.data ?? []).filter(contact => !seen.has(contact.id));
+      setAvailableContacts(previous => [...previous, ...appended]);
+      setAvailableContactsTotal(result.total ?? 0);
+      setContactPage(nextPage);
+      setMoreAvailableContacts(nextPage * 100 < (result.total ?? 0));
+    } catch (err) { if (version === contactRequestVersion.current) toastError(err instanceof Error ? err.message : 'Falha ao carregar mais contatos'); }
+    finally { if (version === contactRequestVersion.current) setLoadingAvailableContacts(false); }
+  }
+  useEffect(() => {
+    if (!creatingConversation || !contactPickerOpen) return;
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (contactPickerRef.current && !contactPickerRef.current.contains(event.target as Node)) setContactPickerOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setContactPickerOpen(false);
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [creatingConversation, contactPickerOpen]);
+
   async function createConversation() {
     if (!newContactId) return;
     if (!newChannelId) {toastError('Selecione o número de WhatsApp para esta conversa.');return;}
@@ -422,6 +488,7 @@ export function InboxPage() {
       setContactsMap(prev => ({...prev, ...Object.fromEntries(availableContacts.map(c=>[c.id,c]))}));
       setSelectedConv(conversation);
       setCreatingConversation(false);
+      setContactPickerOpen(false);
       await loadConversations();
       toastSuccess('Conversa criada');
     } catch (err) { toastError(err instanceof Error ? err.message : 'Erro ao criar conversa'); }
@@ -590,7 +657,7 @@ export function InboxPage() {
   return (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       <Modal open={showMyWhatsApp} onClose={()=>setShowMyWhatsApp(false)} title="Meu WhatsApp • Evolution API" size="xl">
-        <ChannelsPanel canManage={false} canConnect onChannelsChanged={refreshChannels} />
+        <ChannelsPanel canManage={false} canConnect ownOnly onChannelsChanged={refreshChannels} />
       </Modal>
       {/* Conversations list */}
       <div className={`${selectedConv ? 'hidden md:flex' : 'flex'} w-full min-w-0 min-h-0 md:w-80 lg:w-96 md:flex-shrink-0 border-r border-slate-200 bg-white flex-col`}>
@@ -604,14 +671,44 @@ export function InboxPage() {
               <option value="">Selecione um WhatsApp</option>
               {channels.map(c=><option key={c.id} value={c.id}>{c.name} ({c.instance_name||'Oficial'})</option>)}
             </select>
-            <input className="input w-full" value={newContactQuery} onChange={e=>setNewContactQuery(e.target.value)} placeholder="Buscar contato por nome ou número..." />
-            {availableContacts.length ? <><select className="input w-full" value={newContactId} onChange={e=>setNewContactId(e.target.value)}>
-              {availableContacts.map(c=><option key={c.id} value={c.id}>{c.name} {c.phone ? `(${c.phone})` : ''}</option>)}
-            </select><div className="flex gap-2"><button className="btn-primary" onClick={createConversation}>Criar</button><button className="btn-secondary" onClick={()=>setCreatingConversation(false)}>Cancelar</button></div></>
-            : <p className="text-sm text-slate-500">Nenhum contato encontrado. Aguarde a sincronização ou cadastre um contato.</p>}
+            <input className="input w-full" value={newContactQuery} onChange={e=>{setNewContactQuery(e.target.value);setContactPickerOpen(false);}} placeholder="Buscar contato por nome ou número..." />
+            {availableContacts.length ? <>
+            <div className="relative" ref={contactPickerRef}>
+              <button type="button" className="input w-full flex items-center justify-between gap-2 text-left"
+                aria-label="Selecionar contato para nova conversa" aria-haspopup="listbox" aria-expanded={contactPickerOpen}
+                onClick={() => setContactPickerOpen(open => !open)}>
+                <span className="truncate min-w-0">
+                  {(() => { const selected = availableContacts.find(c => c.id === newContactId);
+                    return selected ? `${selected.name}${selected.phone ? ` (${selected.phone})` : ''}` : 'Selecione um contato'; })()}
+                </span>
+                <ChevronDown size={16} className="flex-shrink-0 text-slate-400" />
+              </button>
+              {contactPickerOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border border-slate-300 bg-white shadow-xl max-h-64 overflow-y-auto overscroll-contain"
+                  role="listbox" aria-label="Contatos disponíveis">
+                  {availableContacts.map(c => (
+                    <button type="button" key={c.id} role="option" aria-selected={newContactId === c.id}
+                      onClick={() => { setNewContactId(c.id); setContactPickerOpen(false); }}
+                      className={`block w-full text-left text-xs px-3 py-2 border-b border-slate-100 hover:bg-blue-50 break-words ${newContactId === c.id ? 'bg-blue-50 font-semibold text-slate-900' : 'text-slate-700'}`}>
+                      {c.name} {c.phone ? `(${c.phone})` : ''}
+                    </button>
+                  ))}
+                  {moreAvailableContacts && (
+                    <button type="button" className="w-full px-3 py-3 text-xs font-semibold text-blue-700 bg-slate-50 hover:bg-blue-50 disabled:opacity-50"
+                      disabled={loadingAvailableContacts} onClick={() => void loadMoreNewContacts()}>
+                      {loadingAvailableContacts ? 'Carregando...' : `Carregar mais contatos · ${availableContacts.length} de ${availableContactsTotal}`}
+                    </button>
+                  )}
+                  {!moreAvailableContacts && <p className="px-3 py-2 text-xs text-slate-400">Todos os {availableContacts.length} contatos encontrados foram carregados.</p>}
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500">Busque pelo nome ou telefone acima. Para ver mais resultados, abra o seletor e escolha “Carregar mais contatos”.</p>
+            <div className="flex gap-2"><button className="btn-primary" disabled={!newContactId || loadingAvailableContacts} onClick={createConversation}>Criar</button><button className="btn-secondary" onClick={()=>{setCreatingConversation(false);setContactPickerOpen(false);}}>Cancelar</button></div></>
+            : <p className="text-sm text-slate-500">{loadingAvailableContacts ? 'Buscando contatos...' : 'Nenhum contato encontrado. Aguarde a sincronização ou cadastre um contato.'}</p>}
           </div>}
           {isDev && organizations.length>0 && <div><label className="block mb-1 text-xs font-medium text-slate-600">Conversas por empresa</label><select className="input w-full text-sm" aria-label="Empresa das conversas" value={orgId||''} onChange={e=>switchOrganization(e.target.value)}>{organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></div>}
-          {!isMaster && !isDev && <button type="button" className="btn-secondary w-full text-xs" onClick={()=>setShowMyWhatsApp(true)}>Conectar meu WhatsApp (Evolution API)</button>}
+          {!isMaster && !isDev && channelsLoaded && channels.length === 0 && <button type="button" className="btn-secondary w-full text-xs" onClick={()=>setShowMyWhatsApp(true)}>Conectar meu WhatsApp (Evolution API)</button>}
           {showMasterFilters && whatsAppProvider === 'evolution_api' && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-slate-600 space-y-2">
               <div className="flex flex-wrap gap-2 items-center justify-between">
@@ -625,14 +722,18 @@ export function InboxPage() {
           {channels.some(c => ['queued','running'].includes(c.contact_sync?.status ?? '')) && (
             <p className="text-xs text-blue-700" role="status">Sincronizando contatos e chats: {channels.filter(c=>['queued','running'].includes(c.contact_sync?.status ?? '')).map(c=>`${c.name} (${c.contact_sync?.contacts || 0} contatos)`).join(', ')}</p>
           )}
-          {channels.some(c => c.contact_sync?.status === 'error') && (
-            <p className="text-xs text-amber-700">Falha na sincronização de contatos. Consulte o backend.</p>
-          )}
+          {channels.filter(c => c.contact_sync?.status === 'error').map(channel => (
+            <p key={channel.id} className="text-xs text-amber-700" role="alert">
+              Falha na sincronização de {channel.name}: {channel.contact_sync?.error || 'Verifique os logs do backend.'}
+            </p>
+          ))}
           {channels.some(c => c.contact_sync?.partial) && (
             <p className="text-xs text-amber-700">Alguns contatos/chats podem não ter sido recuperados. Veja o backend.</p>
           )}
-          {syncableChannel && <button type="button" className="btn-ghost text-xs" onClick={() => void manuallySyncContacts()}>
-            <RefreshCw size={12}/> Atualizar agenda deste WhatsApp
+          {syncableChannel && <button type="button" className="btn-ghost text-xs"
+            disabled={contactSyncRequesting || ['queued','running'].includes(syncableChannel.contact_sync?.status ?? '')}
+            onClick={() => void manuallySyncContacts()}>
+            <RefreshCw size={12}/> {contactSyncRequesting ? 'Solicitando sincronização...' : 'Atualizar agenda deste WhatsApp'}
           </button>}
           {showNumberFilter && <select className="input w-full text-sm" aria-label="Filtrar número de WhatsApp" value={channelFilter} onChange={e=>{setChannelFilter(e.target.value);setSelectedConv(null);}}>
             <option value="all">Todos os números</option>
@@ -724,6 +825,11 @@ export function InboxPage() {
               );
             })
           )}
+          {!loading && moreConversations && <button type="button"
+            className="btn-ghost text-xs w-full py-3 justify-center" disabled={loadingMore}
+            onClick={() => void loadConversations(false,conversationPage+1)}>
+            {loadingMore ? 'Carregando...' : 'Carregar mais conversas'}
+          </button>}
         </div>
       </div>
       {/* Chat area */}
