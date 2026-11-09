@@ -1,15 +1,16 @@
 import { prisma } from '../db.js';
 import { inboxChannelIds } from './channel-access.js';
 import { HttpError } from '../http.js';
-import { groupTriggerError, groupRuleType } from './group-automation-policy.js';
+import { groupTriggerError, groupRuleType, summaryGroupIds } from './group-automation-policy.js';
 
 export async function validateGroupAutomation(req, trigger, actions, tx=prisma) {
   if (!groupRuleType(trigger)) return;
   const failure=groupTriggerError(trigger,actions);
   if (failure) throw new HttpError(400,failure);
   const authorized=await inboxChannelIds(req,tx);
-  const group=await tx.whatsAppGroup.findFirst({where:{id:trigger.group_id,org_id:req.orgId,integration_id:{in:authorized}},select:{id:true,integration_id:true}});
-  if (!group) throw new HttpError(403,'Grupo de origem indisponível para este usuário.');
+  const ids=trigger.type==='group_daily_summary' ? summaryGroupIds(trigger) : [trigger.group_id];
+  const verified=await tx.whatsAppGroup.findMany({where:{id:{in:ids},org_id:req.orgId,integration_id:{in:authorized}},select:{id:true}});
+  if (verified.length!==ids.length) throw new HttpError(403,'Um ou mais grupos de origem não estão autorizados para este usuário.');
   if (trigger.type!=='group_daily_summary') return;
   const recipient=trigger.recipient;
   if (recipient.kind==='group') {

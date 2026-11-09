@@ -64,6 +64,7 @@ export function AutomationsPage() {
   const [groups, setGroups] = useState<GroupOption[]>([]);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
   const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [waitingFor, setWaitingFor] = useState<'group'|'us'>('group');
   const [summaryTime, setSummaryTime] = useState('20:00');
   const [recipientKind, setRecipientKind] = useState<'contact'|'group'>('contact');
@@ -142,7 +143,7 @@ export function AutomationsPage() {
     setTriggerKeyword('');
     setTriggerTag('');
     setActions([]);
-    setSelectedGroup('');setWaitingFor('group');setSummaryTime('20:00');
+    setSelectedGroup('');setSelectedGroups([]);setWaitingFor('group');setSummaryTime('20:00');
     setRecipientKind('contact');setRecipientGroup('');setRecipientChannel('');
     setRecipientContact('');setRecipientSearch('');setRecipientContacts([]);
     setShowModal(true);
@@ -159,6 +160,7 @@ export function AutomationsPage() {
     setTriggerTag(String((auto.trigger as any)?.tag ?? ''));
     const trigger = auto.trigger as any;
     setSelectedGroup(String(trigger?.group_id ?? ''));
+    setSelectedGroups(Array.isArray(trigger?.group_ids) ? trigger.group_ids : trigger?.group_id ? [trigger.group_id] : []);
     setWaitingFor(trigger?.waiting_for === 'us' ? 'us' : 'group');
     setSummaryTime(String(trigger?.time ?? '20:00'));
     setRecipientKind(trigger?.recipient?.kind === 'group' ? 'group' : 'contact');
@@ -187,8 +189,9 @@ export function AutomationsPage() {
     const isSummary=triggerType==='group_daily_summary';
     const isGroup=triggerType==='group_no_reply'||isSummary;
     if (!isSummary && !actions.length) { toastWarning('Adicione ao menos uma ação.'); return; }
-    if (isGroup && !selectedGroup) { toastWarning('Selecione o grupo que será monitorado.'); return; }
+    if (isGroup && (isSummary ? !selectedGroups.length : !selectedGroup)) { toastWarning('Selecione ao menos um grupo que será monitorado.'); return; }
     if (isSummary) {
+      if (selectedGroups.length > 100) {toastWarning('Selecione no máximo 100 grupos.');return;}
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(summaryTime)) {toastWarning('Informe um horário válido.');return;}
       if (recipientKind==='group'&&!recipientGroup || recipientKind==='contact'&&(!recipientChannel||!recipientContact)) {
         toastWarning('Selecione o grupo ou contato que receberá o resumo.'); return;
@@ -209,7 +212,8 @@ export function AutomationsPage() {
       if (triggerType === 'out_of_hours') trigger.hours = triggerHours;
       if (triggerType === 'keyword') trigger.keyword = triggerKeyword;
       if (triggerType === 'tag_added') trigger.tag = triggerTag;
-      if (isGroup) trigger.group_id=selectedGroup;
+      if (isGroup && !isSummary) trigger.group_id=selectedGroup;
+      if (isSummary) trigger.group_ids=selectedGroups;
       if (triggerType==='group_no_reply') {
         trigger.timeout_minutes=parseInt(triggerTimeout,10);
         trigger.waiting_for=waitingFor;
@@ -289,7 +293,7 @@ export function AutomationsPage() {
     if (type === 'keyword') return `${found.label}: "${t.keyword}"`;
     if (type === 'tag_added') return `${found.label}: "${t.tag}"`;
     if (type === 'group_no_reply') return `${found.label} · ${t.timeout_minutes} min · ${t.waiting_for==='group'?'aguardando participantes':'aguardando equipe'} · ${groups.find(g=>g.id===t.group_id)?.subject??'Grupo selecionado'}`;
-    if (type === 'group_daily_summary') return `${found.label} · ${t.time} · ${groups.find(g=>g.id===t.group_id)?.subject??'Grupo selecionado'}`;
+    if (type === 'group_daily_summary') { const ids=Array.isArray(t.group_ids)?t.group_ids:(t.group_id?[t.group_id]:[]);return `${found.label} · ${t.time} · ${ids.length} grupo(s)`; }
     return found.label;
   };
 
@@ -429,14 +433,26 @@ export function AutomationsPage() {
                   {TRIGGER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
-              {(triggerType === 'group_no_reply' || triggerType === 'group_daily_summary') && (
+              {triggerType === 'group_no_reply' && (
                 <div>
                   <label className="label">Grupo que esta automação vai monitorar *</label>
                   <select value={selectedGroup} onChange={e=>setSelectedGroup(e.target.value)} className="input">
                     <option value="">Selecione um grupo específico...</option>
                     {groups.map(g=><option key={g.id} value={g.id}>{g.subject} · {channels.find(c=>c.id===g.integration_id)?.name??'WhatsApp'}</option>)}
                   </select>
-                  {groups.length===0&&<p className="text-xs text-amber-600 mt-1">Nenhum grupo disponível nas instâncias autorizadas.</p>}
+                </div>
+              )}
+              {triggerType === 'group_daily_summary' && (
+                <div>
+                  <label className="label">Grupos que esta automação vai monitorar * ({selectedGroups.length} selecionado(s))</label>
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-300 p-3 space-y-2">
+                    {groups.map(g=><label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={e=>setSelectedGroups(prev=>e.target.checked ? [...prev,g.id] : prev.filter(id=>id!==g.id))} />
+                      <span>{g.subject} · {channels.find(c=>c.id===g.integration_id)?.name??'WhatsApp'}</span>
+                    </label>)}
+                    {groups.length===0 && <p className="text-sm text-amber-600">Nenhum grupo disponível nas instâncias autorizadas.</p>}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Cada grupo terá um resumo e uma mensagem separados, usando as mesmas instruções e horário. Máximo de 100 grupos.</p>
                 </div>
               )}
               {triggerType === 'group_no_reply' && (

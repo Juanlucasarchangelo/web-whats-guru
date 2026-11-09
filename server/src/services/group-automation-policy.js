@@ -2,10 +2,28 @@
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const validUuid = value => typeof value === 'string' && UUID.test(value);
 export const groupRuleType = trigger => ['group_no_reply','group_daily_summary'].includes(trigger?.type);
+export function summaryGroupIds(trigger) {
+  if (trigger?.type !== 'group_daily_summary') return [];
+  if (Array.isArray(trigger.group_ids)) return trigger.group_ids;
+  return trigger.group_id ? [trigger.group_id] : [];
+}
+export function summaryExecutionKey(rule, day, groupId) {
+  // A new saved revision allows retry after a failure without destroying audit records.
+  return `daily:${day}:${groupId}:${new Date(rule.updated_at).getTime()}`;
+}
+export function summaryAlreadyDelivered(rows, groupId, legacyGroupId) {
+  return rows.some(row => row.status === 'completed' &&
+    (row.details?.group_id === groupId || (row.execution_key === legacyGroupId && row.details?.group_id == null)));
+}
 export const validSummaryTime = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 export function groupTriggerError(trigger, actions) {
   if (!groupRuleType(trigger)) return null;
-  if (!validUuid(trigger.group_id)) return 'Selecione o grupo a monitorar.';
+  if (trigger.type === 'group_no_reply' && !validUuid(trigger.group_id)) return 'Selecione o grupo a monitorar.';
+  if (trigger.type === 'group_daily_summary') {
+    const ids=summaryGroupIds(trigger);
+    if (!ids.length || ids.length > 100 || ids.some(id=>!validUuid(id)) || new Set(ids).size!==ids.length)
+      return 'Selecione de 1 a 100 grupos válidos, sem duplicatas.';
+  }
   if (trigger.type === 'group_no_reply') {
     if (!Number.isInteger(trigger.timeout_minutes) || trigger.timeout_minutes < 1 || trigger.timeout_minutes > 10080)
       return 'Informe um intervalo de 1 a 10080 minutos.';

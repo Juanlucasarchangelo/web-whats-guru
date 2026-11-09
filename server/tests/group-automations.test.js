@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitingSide, eligibleGroupSilence, groupTriggerError, isSavedPersonalContact, zonedDay } from '../src/services/group-automation-policy.js';
+import { awaitingSide, eligibleGroupSilence, groupTriggerError, isSavedPersonalContact, zonedDay, summaryGroupIds, summaryExecutionKey, summaryAlreadyDelivered } from '../src/services/group-automation-policy.js';
 
 const gid='a748372e-2eea-4e44-9da9-403711a6786c';
 const rid='b748372e-2eea-4e44-9da9-403711a6786c';
@@ -39,4 +39,22 @@ test('group-only participants are not imported into personal contacts',()=>{
  assert.equal(isSavedPersonalContact({remoteJid:'5511999990000@s.whatsapp.net',name:'Cliente',isSaved:true}),true);
  assert.equal(isSavedPersonalContact({remoteJid:'5511999990000@s.whatsapp.net',name:'Cliente'}),true);
  assert.equal(isSavedPersonalContact({remoteJid:'123456@g.us',name:'Grupo',isGroup:true}),false);
+});
+
+test('multi-group summaries preserve legacy and require unique authorized-looking IDs',()=>{
+ const t={type:'group_daily_summary',group_ids:[gid,rid],time:'17:00',recipient:{kind:'contact',contact_id:rid,integration_id:iid}};
+ assert.equal(groupTriggerError(t,[{type:'ai_daily_summary'}]),null);
+ assert.deepEqual(summaryGroupIds(t),[gid,rid]);
+ assert.deepEqual(summaryGroupIds({...t,group_ids:undefined,group_id:gid}),[gid]);
+ assert.match(groupTriggerError({...t,group_ids:[gid,gid]},[{type:'ai_daily_summary'}]),/duplicatas/);
+ assert.match(groupTriggerError({...t,group_ids:[]},[{type:'ai_daily_summary'}]),/Selecione/);
+});
+test('edits create retry key for failures; completed send suppresses duplicates',()=>{
+ const rule={updated_at:new Date('2026-11-09T18:00:00Z')};
+ const key=summaryExecutionKey(rule,'2026-11-09',gid);
+ assert.notEqual(key,summaryExecutionKey({...rule,updated_at:new Date('2026-11-09T18:01:00Z')},'2026-11-09',gid));
+ assert.notEqual(key,summaryExecutionKey(rule,'2026-11-09',rid));
+ assert.equal(summaryAlreadyDelivered([{status:'failed',execution_key:key,details:{group_id:gid}}],gid,'daily:2026-11-09'),false);
+ assert.equal(summaryAlreadyDelivered([{status:'completed',execution_key:key,details:{group_id:gid}}],gid,'daily:2026-11-09'),true);
+ assert.equal(summaryAlreadyDelivered([{status:'completed',execution_key:key,details:{group_id:gid}}],rid,'daily:2026-11-09'),false);
 });

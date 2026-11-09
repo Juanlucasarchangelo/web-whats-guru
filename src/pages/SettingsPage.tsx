@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { ChannelsPanel } from '@/components/ChannelsPanel';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
@@ -27,7 +26,7 @@ const INTEGRATION_TYPES = [
   {
     type: 'ai_provider',
     name: 'Provedor de IA',
-    description: 'Integre um provedor de IA para respostas inteligentes e triagem automática.',
+    description: 'Uma conexão de IA por empresa: escolha OpenAI ou Gemini para resumos, sugestões e futuras automações.',
     icon: Bot,
     color: 'bg-purple-100 text-purple-700',
     docs: 'https://platform.openai.com/docs',
@@ -43,8 +42,6 @@ const INTEGRATION_TYPES = [
 ];
 
 export function SettingsPage() {
-  const { user } = useAuth();
-  const isDev = user?.global_role === 'dev';
   const { currentOrg,currentMembership , can} = useOrg();
   const orgId = currentOrg?.id;
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -56,6 +53,8 @@ export function SettingsPage() {
   const [configType, setConfigType] = useState<string | null>(null);
   const [configForm, setConfigForm] = useState<Record<string, string>>({});
   const [whatsappSaving, setWhatsappSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
   const [whatsappResult, setWhatsappResult] = useState<{ verifyToken: string; phoneNumber: string; verifiedName: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -101,8 +100,9 @@ export function SettingsPage() {
       form.api_key = '';
     } else if (integType === 'ai_provider') {
       form.provider = getConfigValue(existing, 'provider') || 'openai';
-      form.model = getConfigValue(existing, 'model') || 'gpt-4';
+      form.model = getConfigValue(existing, 'model') || 'gpt-4.1-mini';
       form.api_key = '';
+      form.summary_instructions = getConfigValue(existing, 'summary_instructions');
     } else if (integType === 'webhook') {
       form.url = getConfigValue(existing, 'url');
     }
@@ -162,6 +162,7 @@ export function SettingsPage() {
 
   async function handleSaveOtherConfig() {
     if (!orgId || !configType) return;
+    setConfigSaving(true);
     try {
       const result = await callIntegrationApi({
         org_id: orgId,
@@ -171,13 +172,42 @@ export function SettingsPage() {
         api_key: configForm.api_key,
         url: configForm.url,
       });
-
-      if (result.connected) toastSuccess('Integração configurada e validada com sucesso!');
+      if (result.connected) toastSuccess(configType === 'ai_provider'
+        ? 'Provedor de IA conectado! Essa configuração será compartilhada com os módulos da empresa.'
+        : 'Integração configurada e validada com sucesso!');
       setShowConfigModal(null);
       setConfigType(null);
-      load();
+      setConfigForm({});
+      await load();
     } catch (err) {
       toastError(err instanceof Error ? err.message : 'Erro ao salvar configuração');
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
+  async function handleSaveAIInstructions() {
+    setConfigSaving(true);
+    try {
+      await apiRequest('/integrations/ai/instructions', { method: 'POST', body: JSON.stringify({
+        summary_instructions: configForm.summary_instructions || '',
+      }) });
+      toastSuccess('Instruções dos resumos salvas para esta empresa.');
+      await load();
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Erro ao salvar instruções da IA.');
+    } finally { setConfigSaving(false); }
+  }
+
+  async function handleTestAIConnection() {
+    setAiTesting(true);
+    try {
+      const result = await apiRequest<{ ok: boolean, response: string, provider: string }>('/integrations/ai/test', { method: 'POST' });
+      if (result.ok) toastSuccess(`${result.provider === 'gemini' ? 'Gemini' : 'OpenAI'} respondeu ao teste. Integração pronta para resumos e sugestões!`);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Falha ao testar integração de IA.');
+    } finally {
+      setAiTesting(false);
     }
   }
 
@@ -262,8 +292,7 @@ export function SettingsPage() {
 
       {activeTab === 'integrations' && (
         <div className="space-y-4">
-          {isDev && <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">A conta DEV apenas monitora as integrações desta empresa. Para preparar uma integração para um usuário, abra Administração DEV → Integrações.</div>}
-          <ChannelsPanel canManage={can('settings.manage') && !isDev} canDelete={can('channels.delete') && (isDev || ['master','administrador','owner','admin'].includes(currentMembership?.role ?? ''))} />
+          <ChannelsPanel canManage={can('settings.manage')} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));
@@ -280,6 +309,9 @@ export function SettingsPage() {
                         {existing ? getStatusBadge(existing.status) : integType.type === 'whatsapp' ? <span className="badge badge-gray">Não configurada</span> : null}
                       </div>
                       <p className="text-sm text-slate-500">{integType.description}</p>
+                      {integType.type === 'ai_provider' && existing?.status === 'connected' && (
+                        <p className="text-xs text-green-700 mt-2">Conexão central ativa · {getConfigValue(existing, 'provider') === 'gemini' ? 'Gemini' : 'OpenAI'} · {getConfigValue(existing, 'model') || 'gpt-4.1-mini'} · chave armazenada com criptografia</p>
+                      )}
                       {integType.type === 'whatsapp' && whatsappConnected && whatsappDisplayPhone && (
                         <div className="mt-2 flex items-center gap-2 text-sm text-green-700">
                           <Phone size={14} />
@@ -288,7 +320,7 @@ export function SettingsPage() {
                         </div>
                       )}
                       <a
-                        href={integType.docs}
+                        href={integType.type === 'ai_provider' && getConfigValue(existing, 'provider') === 'gemini' ? 'https://ai.google.dev/gemini-api/docs' : integType.docs}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-2"
@@ -298,10 +330,15 @@ export function SettingsPage() {
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 flex-shrink-0">
-                    {!isDev && <button onClick={() => openConfig(integType.type)} className="btn-secondary text-xs">
+                    {can('settings.manage') && <button onClick={() => openConfig(integType.type)} className="btn-secondary text-xs">
                       <Settings size={14} /> {existing ? 'Configurar' : 'Conectar'}
                     </button>}
-                    {!isDev && existing && existing.status !== 'disconnected' && (
+                    {integType.type === 'ai_provider' && existing?.status === 'connected' && can('settings.manage') && (
+                      <button type="button" onClick={handleTestAIConnection} disabled={aiTesting} className="btn-secondary text-xs">
+                        {aiTesting ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />} {aiTesting ? 'Testando...' : 'Testar conexão'}
+                      </button>
+                    )}
+                    {can('settings.manage') && existing && existing.status !== 'disconnected' && (
                       <button onClick={() => handleDisconnect(existing)} className="btn-ghost text-xs text-red-600">
                         Desconectar
                       </button>
@@ -511,26 +548,53 @@ export function SettingsPage() {
           )}
           {configType === 'ai_provider' && (
             <>
+              <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+                A conexão é compartilhada por toda esta empresa. Resumos diários dos grupos, sugestões de resposta e futuras funções de IA utilizarão a mesma chave e o modelo escolhido.
+              </div>
               <div>
-                <label className="label">Provedor</label>
-                <select value={configForm.provider ?? 'openai'} onChange={(e) => setConfigForm({ ...configForm, provider: e.target.value })} className="input">
+                <label className="label">Provedor ativo</label>
+                <select value={configForm.provider || 'openai'} onChange={(e) => setConfigForm({
+                  ...configForm, provider: e.target.value,
+                  model: e.target.value === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4.1-mini',
+                  api_key: '',
+                })} className="input">
                   <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="google">Google AI</option>
+                  <option value="gemini">Google Gemini</option>
                 </select>
+                <p className="text-xs text-slate-400 mt-1">Somente um provedor fica ativo por empresa. Ao trocar, informe a chave do novo provedor. A conexão anterior será substituída neste mesmo cartão.</p>
               </div>
               <div>
-                <label className="label">Modelo</label>
-                <input type="text" value={configForm.model ?? ''} onChange={(e) => setConfigForm({ ...configForm, model: e.target.value })} className="input" placeholder="Ex: gpt-4" />
+                <label className="label">Modelo {configForm.provider === 'gemini' ? 'Gemini' : 'OpenAI'}</label>
+                <input type="text" value={configForm.model ?? 'gpt-4.1-mini'} onChange={(e) => setConfigForm({ ...configForm, model: e.target.value })} className="input" placeholder={configForm.provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4.1-mini'} />
               </div>
               <div>
-                <label className="label">API Key</label>
-                <input type="password" value={configForm.api_key ?? ''} onChange={(e) => setConfigForm({ ...configForm, api_key: e.target.value })} className="input" placeholder="sua-chave-api" />
-                <p className="text-xs text-slate-400 mt-1">A chave será validada pela OpenAI e armazenada somente no servidor.</p>
+                <label className="label">Chave da API {configForm.provider === 'gemini' ? 'Gemini' : 'OpenAI'}</label>
+                <input type="password" autoComplete="new-password" value={configForm.api_key ?? ''} onChange={(e) => setConfigForm({ ...configForm, api_key: e.target.value })} className="input" placeholder={configForm.provider === 'gemini' ? 'Cole a chave criada no Google AI Studio' : 'sk-...'} />
+                <p className="text-xs text-slate-400 mt-1">{showConfigModal && getConfigValue(showConfigModal, 'provider') === configForm.provider
+                  ? 'Deixe vazio para manter a chave atual; preencha para substituí-la.'
+                  : 'Informe a chave desse provedor. Ela será validada e armazenada criptografada no servidor.'}</p>
+                <p className="text-xs text-slate-400 mt-1">{configForm.provider === 'gemini'
+                  ? 'O nível gratuito tem limites e regras próprias de tratamento de dados. Para o piloto, utilize somente conversas fictícias.'
+                  : 'A API OpenAI possui faturamento separado da assinatura do ChatGPT.'}</p>
+              </div>
+              <div className="rounded-lg border border-slate-700 p-3 space-y-2">
+                <label className="label">Instruções da IA · Resumos de grupos</label>
+                <p className="text-xs text-slate-400">Estilo operacional detalhado: identificar pendências, materiais, responsáveis e horários; ignorar repetições sem relevância. As regras de segurança são fixas.</p>
+                <textarea className="input min-h-[140px]" maxLength={100000}
+                  value={configForm.summary_instructions ?? ''}
+                  onChange={e => setConfigForm({ ...configForm, summary_instructions: e.target.value })}
+                  placeholder="Produza um resumo operacional detalhado. Identifique materiais faltantes, quantidades, responsáveis, horários propostos e confirmados, pendências e próximos passos. Ignore repetições sem relevância." />
+                <p className="text-xs text-slate-400">Em branco utiliza as instruções operacionais padrão. Máximo 100.000 caracteres.</p>
+                <button type="button" onClick={handleSaveAIInstructions} disabled={configSaving || !showConfigModal} className="btn-secondary">
+                  Salvar instruções dos resumos
+                </button>
               </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button onClick={() => { setShowConfigModal(null); setConfigType(null); }} className="btn-secondary">Cancelar</button>
-                <button onClick={handleSaveOtherConfig} disabled={!configForm.api_key} className="btn-primary">Conectar OpenAI</button>
+                <button onClick={() => { setShowConfigModal(null); setConfigType(null); setConfigForm({}); }} className="btn-secondary">Cancelar</button>
+                <button onClick={handleSaveOtherConfig} disabled={configSaving || ((!showConfigModal || getConfigValue(showConfigModal, 'provider') !== configForm.provider) && !configForm.api_key)} className="btn-primary flex items-center gap-2">
+                  {configSaving && <Loader2 size={14} className="animate-spin" />}
+                  {configSaving ? 'Validando...' : showConfigModal ? 'Salvar conexão' : `Conectar ${configForm.provider === 'gemini' ? 'Gemini' : 'OpenAI'}`}
+                </button>
               </div>
             </>
           )}
