@@ -71,14 +71,20 @@ export function identifyEvolutionMedia(item) {
       caption: ''
     };
   }
-  const name = typeof media.fileName === 'string' ? media.fileName.slice(0, 255) : null;
-  const mime = normalizeMediaMime(media.mimetype, name, type).slice(0, 191) || null;
+  const name = typeof media.fileName === 'string' ? media.fileName.slice(0, 255) :
+    typeof item?.fileName === 'string' ? item.fileName.slice(0, 255) : null;
+  const mime = (normalizeMediaMime(media.mimetype, name, type) ||
+    ({image:'image/jpeg',video:'video/mp4',audio:'audio/ogg',sticker:'image/webp'})[type] || '').slice(0, 191) || null;
   const rawSize = media.fileLength;
   const size = Number(rawSize?.low ?? rawSize);
   // Mantem os metadados originais necessarios para descriptografar o arquivo na Evolution.
   const safe = Object.fromEntries(Object.entries(media).filter(([k]) => !['base64', 'jpegThumbnail'].includes(k)));
   const providerKey = item?.key ?? item?.data?.key ?? {};
-  const serialized = JSON.stringify({ key: { id: String(providerKey.id ?? ''), remoteJid: String(providerKey.remoteJid ?? ''), fromMe: Boolean(providerKey.fromMe) }, message: { [key]: safe } });
+  const serialized = JSON.stringify({ key: { id: String(providerKey.id ?? ''),
+    remoteJid: String(providerKey.remoteJid ?? ''), fromMe: Boolean(providerKey.fromMe),
+    ...(providerKey.participant ? { participant: String(providerKey.participant) } : {}),
+    ...(providerKey.remoteJidAlt ? { remoteJidAlt: String(providerKey.remoteJidAlt) } : {}) },
+    message: { [key]: safe } });
   return {
     type, mime, name,
     size: Number.isSafeInteger(size) && size >= 0 && size <= 2147483647 ? size : null,

@@ -1,7 +1,6 @@
 
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { z } from 'zod';
 
 import { prisma } from '../db.js';
@@ -29,7 +28,8 @@ import {
   withConversationIdentityLock,
 } from '../services/conversation-thread.js';
 
-import { saveMedia, readMedia } from '../services/nas-storage.js';
+import { readMedia, safeMediaFilename } from '../services/nas-storage.js';
+import { archiveEvolutionMedia, originalMediaFilename } from '../services/evolution-media-archive.js';
 
 const idParam = z.string().uuid();
 
@@ -118,113 +118,6 @@ const mediaExtensions = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
 };
 
-function mediaFilename(message, mime) {
-  const original = path.basename(
-    String(message.media_name || '').replace(/\\/g, '/')
-  );
-
-  if (original && original !== '.' && original !== '..') {
-    return original;
-  }
-
-  return `${message.id}${mediaExtensions[mime] || '.bin'}`;
-}
-
-/**
- * Arquiva uma mídia no QNAP.
- *
- * Estrutura:
- *
- * Public/
- *   Falacomigo/
- *     Nome da conexão/
- *       Telefone - Nome do contato/
- *         arquivo.ext
- */
-async function archiveEvolutionMedia({
-  orgId,
-  conversation,
-  message,
-  mime,
-  bytes,
-}) {
-  if (!process.env.FALACOMIGO_STORAGE_PATH) {
-    return;
-  }
-
-  const api = await loadEvolution(
-    orgId,
-    conversation.integration_id
-  );
-
-  if (!api) {
-    throw new Error('Integração Evolution indisponível.');
-  }
-
-  // Nome definido no painel Integrações do FalaComigo.
-  const connectionName = String(
-    api.integration?.name || api.instance
-  ).trim();
-
-  // Busca telefone e nome do contato.
-  const contact = await prisma.contact.findFirst({
-    where: {
-      id: conversation.contact_id,
-      org_id: orgId,
-    },
-    select: {
-      phone: true,
-      name: true,
-    },
-  });
-
-  const phone = String(
-    contact?.phone || ''
-  ).replace(/\D/g, '');
-
-  const contactName = String(
-    contact?.name || ''
-  ).trim();
-
-  const contactIdentifier = phone || conversation.contact_id;
-
-  const contactFolder = contactName
-    ? `${contactIdentifier} - ${contactName}`
-    : contactIdentifier;
-
-  // O nas-storage.js sanitiza os nomes das pastas.
-  const saved = await saveMedia({
-    instance: connectionName,
-    contact: contactFolder,
-    filename: mediaFilename(message, mime),
-    buffer: bytes,
-  });
-
-  // Preserva os metadados originais da Evolution API.
-  const metadata = {
-    ...message.media_message,
-    nas_path: saved.relativePath,
-  };
-
-  // Registra o caminho relativo no MySQL.
-  await prisma.message.update({
-    where: {
-      id: message.id,
-    },
-    data: {
-      media_message: metadata,
-    },
-  });
-
-  console.info('[NAS] Mídia arquivada com sucesso:', {
-    messageId: message.id,
-    connection: connectionName,
-    contact: contactFolder,
-    path: saved.relativePath,
-    size: saved.size,
-  });
-}
-
 /**
  * Recupera uma mídia.
  *
@@ -303,6 +196,9 @@ export function conversationsRouter() {
     const search = String(req.query.search || '').trim().slice(0, 120);
     const channelId = req.query.integration_id ? idParam.parse(String(req.query.integration_id)) : null;
     const tagId = req.query.tag_id ? idParam.parse(String(req.query.tag_id)) : null;
+    const kind = String(req.query.kind || 'all');
+    if (!['all', 'private', 'groups'].includes(kind)) throw new HttpError(400, 'Filtro de conversas inválido.');
+    if (kind !== 'all') where.is_group = kind === 'groups';
     if (status !== 'all') {
       if (!['open','pending','closed','resolved'].includes(status)) throw new HttpError(400,'Status invalido.');
       where.status = status;
@@ -330,7 +226,13 @@ export function conversationsRouter() {
       org_id:req.orgId,id:{in:rows.map(row=>row.contact_id)},
     },select:{id:true,name:true,phone:true}}) : [];
     const names = new Map(contacts.map(contact=>[contact.id,contact]));
-    const data = rows.map(row => ({...row,contact:names.get(row.contact_id)||null}));
+    const groups = rows.some(row => row.is_group) ? await prisma.whatsAppGroup.findMany({
+      where: { org_id: req.orgId, conversation_id: { in: rows.filter(row => row.is_group).map(row => row.id) } },
+      select: { id: true, conversation_id: true, subject: true, jid: true, participant_count: true },
+    }) : [];
+    const groupsByConversation = new Map(groups.map(group => [group.conversation_id, group]));
+    const data = rows.map(row => ({ ...row,contact:names.get(row.contact_id)||null,
+      group: groupsByConversation.get(row.id) || null }));
     res.json({ data, total, page, limit, has_more: page * limit < total });
   }));
 
@@ -341,7 +243,7 @@ export function conversationsRouter() {
     const contact = await prisma.contact.findFirst({
       where: {
         id: input.contact_id,
-        org_id: req.orgId,
+        org_id: req.orgId, is_group: false,
       },
       select: {
         id: true,
@@ -350,11 +252,10 @@ export function conversationsRouter() {
     });
 
     if (!contact) {
-      throw new HttpError(
-        404,
-        'Contato nao encontrado nesta organizacao.'
-      );
+      throw new HttpError(404, 'Contato nao encontrado nesta organizacao.');
     }
+    if (await prisma.whatsAppGroup.count({ where: { org_id: req.orgId, contact_id: contact.id } }))
+      throw new HttpError(400, 'Grupos devem ser abertos pela Caixa de Entrada.');
 
     let integrationId = null;
 
@@ -526,10 +427,8 @@ export function conversationsRouter() {
       });
 
       res.set('Content-Type', mime);
-      res.set(
-        'Content-Disposition',
-        `inline; filename="${msg.id}"`
-      );
+      const filename = safeMediaFilename(originalMediaFilename(msg));
+      res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
       res.set('Cache-Control', 'private, no-store');
       res.set('X-Content-Type-Options', 'nosniff');
 

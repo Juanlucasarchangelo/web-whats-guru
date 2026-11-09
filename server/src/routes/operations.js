@@ -90,13 +90,13 @@ export function operationsRouter(){
  }));
  router.get('/consent',wrap(async(req,res)=>{
   mustAdmin(req);
-  const contacts=await prisma.contact.findMany({where:{org_id:req.orgId},orderBy:{name:'asc'},take:500,select:{id:true,name:true,phone:true,custom_fields:true}});
+  const contacts=await prisma.contact.findMany({where:{org_id:req.orgId,is_group:false},orderBy:{name:'asc'},take:500,select:{id:true,name:true,phone:true,custom_fields:true}});
   res.json({data:contacts.map(c=>({id:c.id,name:c.name,phone:c.phone,opt_in:hasMarketingConsent(c)}))});
  }));
  router.put('/consent/:contactId',wrap(async(req,res)=>{
   mustAdmin(req);const id=uuid.parse(req.params.contactId);
   const {consent,source}=z.object({consent:z.boolean(),source:z.string().trim().min(5).max(150)}).strict().parse(req.body);
-  const c=await prisma.contact.findFirst({where:{id,org_id:req.orgId}});
+  const c=await prisma.contact.findFirst({where:{id,org_id:req.orgId,is_group:false}});
   if(!c)throw new HttpError(404,'Contato nao encontrado.');
   await prisma.$transaction(async tx=>{
    await tx.contact.update({where:{id},data:{custom_fields:{...(c.custom_fields||{}),whatsapp_marketing_opt_in:consent,whatsapp_marketing_source:source,whatsapp_marketing_at:new Date().toISOString()}}});
@@ -172,7 +172,7 @@ export function operationsRouter(){
 }
 
 async function recipientsFor(orgId,campaign) {
- const where={org_id:orgId,...(campaign.segment_stage?{crm_stage:campaign.segment_stage}:{})};
+ const where={org_id:orgId,is_group:false,...(campaign.segment_stage?{crm_stage:campaign.segment_stage}:{})};
  const contacts=await prisma.contact.findMany({where,select:{id:true,name:true,phone:true,custom_fields:true},take:1000});
  const ids=Array.isArray(campaign.segment_tags)?campaign.segment_tags:[];
  const eligible=contacts.filter(c=>hasMarketingConsent(c)&&validPhone(c.phone));

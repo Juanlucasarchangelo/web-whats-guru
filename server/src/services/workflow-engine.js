@@ -104,6 +104,20 @@ async function tag(ctx, name, notify = true) {
     if (notify) await runMatching(ctx, { triggerType: 'tag_added', tag: label, token: `tag:${ctx.conversation.id}:${found.id}`, allowRecursive: false });
   }
 }
+async function replaceTag(ctx, oldTag, newTag) {
+  if (!ctx.conversation.is_group) throw Error('Troca de etiqueta disponível apenas nos grupos.');
+  const oldName=validName(oldTag),newName=validName(newTag);
+  if (!oldName || !newName) throw Error('Informe a etiqueta antiga e a nova.');
+  // Add first: an invalid destination must not remove the original classification.
+  await tag(ctx,newName,false);
+  if (norm(oldName)===norm(newName)) return;
+  const old=await prisma.tag.findFirst({where:{org_id:ctx.orgId,name:oldName}});
+  if (!old) return;
+  await prisma.$transaction(async tx=>{
+    await tx.conversationTag.deleteMany({where:{conversation_id:ctx.conversation.id,tag_id:old.id}});
+    await tx.contactTag.deleteMany({where:{contact_id:ctx.contact.id,tag_id:old.id}});
+  });
+}
 async function assign(ctx, teamName) {
   const name = validName(teamName);
   const team = await prisma.team.findFirst({ where: { org_id: ctx.orgId, name } });
@@ -136,6 +150,7 @@ async function action(ctx, item, answer = '') {
   switch (item?.type) {
     case 'send_message': return send(ctx, item.text, answer);
     case 'add_tag': return tag(ctx, item.tag);
+    case 'replace_tag': return replaceTag(ctx, item.old_tag, item.tag);
     case 'assign_team': return assign(ctx, item.team);
     case 'call_webhook': return webhook(ctx, item.url, answer);
     default: throw Error(`Acao nao suportada: ${String(item?.type)}`);
@@ -311,7 +326,7 @@ export async function workflowTick() {
         const minutes = Number(rule.trigger?.timeout_minutes);
         if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10080) continue;
         const cutoff = new Date(Date.now() - minutes * 60000);
-        const conversations = await prisma.conversation.findMany({ where: { org_id: org.id, channel: 'whatsapp', status: { not: 'closed' }, last_message_at: { lte: cutoff } }, select: { id: true }, take: 100 });
+        const conversations = await prisma.conversation.findMany({ where: { org_id: org.id, channel: 'whatsapp', is_group: false, status: { not: 'closed' }, last_message_at: { lte: cutoff } }, select: { id: true }, take: 100 });
         for (const row of conversations) {
           await serialized(row.id, async () => {
             const ctx = await context(org.id, row.id); if (!ctx) return;
@@ -326,4 +341,11 @@ export async function workflowTick() {
       }
     }
   } finally { runningTick = false; }
+}
+
+/** Group-specific actions reuse the existing, audited WhatsApp workflow primitives. */
+export async function executeGroupAutomationAction({orgId,conversationId,item}) {
+  const ctx=await context(orgId,conversationId);
+  if(!ctx?.conversation.is_group) throw Error('Grupo não encontrado ou conversa fechada.');
+  return action(ctx,item);
 }

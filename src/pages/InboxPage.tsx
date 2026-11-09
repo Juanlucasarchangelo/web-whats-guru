@@ -16,9 +16,11 @@ import {
   Tag as TagIcon, StickyNote, Zap, CheckCheck, Check, Circle,
   Inbox as InboxIcon, X, MoreVertical, UserCheck, Archive, MessageCircle, ArrowLeft, ChevronDown,
 } from 'lucide-react';
-interface ImportStatus { status:string; contacts?:number; chats?:number; scanned?:number;
-  pages?:number; counts?:Record<string,number>; aliases?:number; alias_warning?:boolean; cutoff?:string; truncated?:boolean; partial?:boolean; error?:string; }
-interface ChannelInfo { id:string; name:string; instance_name:string|null; provider:string; status:string; contact_sync?:ImportStatus; }
+interface ImportStatus { status:string; contacts?:number; chats?:number; groups?:number; scanned?:number;
+  pages?:number; counts?:Record<string,number>; aliases?:number; alias_warning?:boolean; cutoff?:string; truncated?:boolean; partial?:boolean; error?:string;
+  group?:boolean; source?:string; provider_scanned?:number; queued_media?:number; media_retry_incomplete?:boolean;
+  provider_warning?:string[]; provider_settings?:{sync_full_history:boolean|null; groups_ignore:boolean|null}; }
+interface ChannelInfo { id:string; name:string; instance_name:string|null; provider:string; status:string; contact_sync?:ImportStatus; group_sync?:ImportStatus; }
 interface OrgMemberInfo {
   user_id: string;
   role: string;
@@ -51,6 +53,9 @@ export function InboxPage() {
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [channelsLoaded, setChannelsLoaded] = useState(false);
   const [channelFilter, setChannelFilter] = useState('all');
+  const [kindFilter, setKindFilter] = useState<'all'|'private'|'groups'>('all');
+  const [syncingGroups, setSyncingGroups] = useState(false);
+  const [groupSyncMessage, setGroupSyncMessage] = useState<string|null>(null);
   const [newChannelId, setNewChannelId] = useState('');
   const [contactsMap, setContactsMap] = useState<Record<string, Contact>>({});
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
@@ -96,7 +101,7 @@ export function InboxPage() {
     if (!silent && page === 1) setLoading(true);
     if (page > 1) setLoadingMore(true);
     try {
-      const query = new URLSearchParams({ limit: '100', page: String(page) });
+      const query = new URLSearchParams({ limit: '100', page: String(page), kind: kindFilter });
       if (channelFilter !== 'all') query.set('integration_id', channelFilter);
       if (statusFilter !== 'all') query.set('status', statusFilter);
       if (assigneeFilter !== 'all') query.set('assignee', assigneeFilter);
@@ -133,7 +138,7 @@ export function InboxPage() {
       if (page > 1) setLoadingMore(false);
       if (!silent && page === 1) setLoading(false);
     }
-  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, channelFilter]);
+  }, [orgId, statusFilter, assigneeFilter, tagFilter, search, channelFilter, kindFilter]);
   // Detecta o provedor da organizacao para mostrar opcoes compatíveis.
   useEffect(() => {
     if (!orgId) { setWhatsAppProvider('unknown'); return; }
@@ -172,6 +177,39 @@ export function InboxPage() {
     setSelectedConv(previous => previous && previous.channel === 'whatsapp' &&
       (!previous.integration_id || !allowed.has(previous.integration_id)) ? null : previous);
   }, [orgId, channels]);
+  const manuallySyncGroups = useCallback(async () => {
+    if (syncingGroups) return;
+    const targets = channels.filter(c => c.provider === 'evolution_api' &&
+      (channelFilter === 'all' || c.id === channelFilter));
+    if (!targets.length) { toastError('Nenhuma instância Evolution disponível para sincronização.'); return; }
+    setSyncingGroups(true);
+    setGroupSyncMessage('Consultando grupos e preparando histórico dos últimos 3 meses...');
+    try {
+      await Promise.all(targets.map(channel => apiRequest(`/channels/${channel.id}/sync-groups`, { method: 'POST' })));
+      toastSuccess('Sincronização dos grupos iniciada');
+      // Discovery runs asynchronously; progress remains visible while messages enter MySQL.
+      let checks = 0;
+      const poll = async () => {
+        checks++;
+        const statuses = await Promise.all(targets.map(channel =>
+          apiRequest<ImportStatus>(`/channels/${channel.id}/sync-groups`)));
+        const running = statuses.some(state => ['queued', 'running'].includes(state.status));
+        const found = statuses.reduce((total, state) => total + (state.groups || 0), 0);
+        setGroupSyncMessage(running ? `Mapeando grupos: ${found} identificado(s)...` :
+          statuses.some(state => state.status === 'error') ?
+            `Alguma instância apresentou erro: ${statuses.filter(state => state.error).map(state => state.error).join('; ')}` :
+            `${found} grupo(s) identificado(s). O histórico está sendo importado em segundo plano.`);
+        void loadConversations(true);
+        if (running && checks < 180) window.setTimeout(() => void poll().catch(() => setSyncingGroups(false)), 2000);
+        else { setSyncingGroups(false); void refreshChannels(); }
+      };
+      void poll().catch(error => { setGroupSyncMessage(String(error?.message || error)); setSyncingGroups(false); });
+    } catch (error) {
+      setGroupSyncMessage(error instanceof Error ? error.message : 'Falha ao sincronizar grupos');
+      toastError(error instanceof Error ? error.message : 'Falha ao sincronizar grupos');
+      setSyncingGroups(false);
+    }
+  }, [syncingGroups, channels, channelFilter, loadConversations, refreshChannels]);
   const selectedChannel = channels.find(c=>c.id===selectedConv?.integration_id);
   const activeConversationProvider = selectedChannel?.provider ?? conversationProvider;
   // Administradores can view their company's chats without managing the other
@@ -356,8 +394,14 @@ export function InboxPage() {
           const rejected = Object.entries(state?.counts || {}).filter(([key, value]) =>
             key.startsWith('ignored_') && value > 0 && key !== 'ignored_out_of_period')
             .map(([key, value]) => `${key.replace('ignored_', '')}: ${value}`).join(', ');
-          const details = `Consultadas ${count} mensagens na Evolution; ${imported} novas, ${existing} já existentes.`;
+          const details = `Consultadas ${count} mensagens desta conversa na Evolution; ${imported} novas, ${existing} já existentes.`;
+          const notes = (state?.provider_warning || []).join(' ');
+          const source = state?.source === 'alternative' ? ' Consulta alternativa ao histórico realizada.' : '';
+          const media = state?.queued_media ? ` ${state.queued_media} arquivo(s) pendente(s) reenfileirado(s) para o NAS.` : '';
+          const moreMedia = state?.media_retry_incomplete ? ' Alguns arquivos aguardam nova tentativa de arquivamento.' : '';
+          const partial = state?.truncated ? ' Importação parcial: limite/paginação da Evolution.' : '';
           setSyncInfo(state?.status === 'error' ? `Falha na sincronização: ${state.error || 'erro desconhecido'}` :
+            state?.group ? `${details}${source}${media}${moreMedia}${partial}${notes ? ` ${notes}` : ''}` :
             state?.truncated ? `${details} Importação parcial: paginação incompleta na Evolution.` :
             count === 0 ? 'A Evolution não disponibilizou mensagens armazenadas para esta conversa. Confira o histórico salvo na Evolution.' :
             `${details}${rejected ? ` Ignoradas (${rejected}).` : ''}${state?.alias_warning ? ' Alguns dados de associação de contatos não puderam ser consultados.' : ''}`);
@@ -735,10 +779,24 @@ export function InboxPage() {
             onClick={() => void manuallySyncContacts()}>
             <RefreshCw size={12}/> {contactSyncRequesting ? 'Solicitando sincronização...' : 'Atualizar agenda deste WhatsApp'}
           </button>}
+          {channels.some(c => c.provider === 'evolution_api') && <div className="space-y-1">
+            <button type="button" className="btn-ghost text-xs" disabled={syncingGroups}
+              onClick={() => void manuallySyncGroups()}>
+              <UsersIcon size={13}/> {syncingGroups ? 'Mapeando grupos...' : 'Sincronizar grupos deste WhatsApp'}
+            </button>
+            {groupSyncMessage && <p role="status" className="text-xs text-slate-500 break-words">{groupSyncMessage}</p>}
+          </div>}
           {showNumberFilter && <select className="input w-full text-sm" aria-label="Filtrar número de WhatsApp" value={channelFilter} onChange={e=>{setChannelFilter(e.target.value);setSelectedConv(null);}}>
             <option value="all">Todos os números</option>
             {channels.map(c=><option key={c.id} value={c.id}>{c.name} · {c.instance_name||'Oficial'}</option>)}
           </select>}
+          <div className="flex rounded-lg border border-slate-200 p-1 gap-1" role="group" aria-label="Tipo de conversa">
+            {([['all','Todas'],['private','Individuais'],['groups','Grupos']] as const).map(([value,label]) =>
+              <button key={value} type="button" onClick={() => { setKindFilter(value); setSelectedConv(null); }}
+                className={`flex-1 rounded-md py-1.5 text-xs font-medium ${kindFilter === value ? 'bg-amber-400 text-slate-900' : 'text-slate-500 hover:bg-slate-100'}`}>
+                {label}
+              </button>)}
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input
@@ -804,11 +862,11 @@ export function InboxPage() {
                   }`}
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 flex-shrink-0">
-                    {(c?.name ?? '?').charAt(0).toUpperCase()}
+                    {conv.is_group ? <UsersIcon size={20} /> : (c?.name ?? '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-900 truncate">{c?.name ?? 'Desconhecido'}</p>
+                      <p className="text-sm font-medium text-slate-900 truncate">{conv.is_group ? (conv.group?.subject || c?.name || 'Grupo') : (c?.name ?? 'Desconhecido')}</p>
                       {conv.unread_count > 0 && (
                         <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-xs font-bold text-white">
                           {conv.unread_count}
@@ -816,7 +874,7 @@ export function InboxPage() {
                       )}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {conv.status === 'open' ? 'Aberta' : conv.status === 'pending' ? 'Pendente' : 'Fechada'}
+                      {conv.is_group ? 'Grupo · ' : ''}{conv.status === 'open' ? 'Aberta' : conv.status === 'pending' ? 'Pendente' : 'Fechada'}
                       {memberName(conv.assigned_to) && ` · ${memberName(conv.assigned_to)}`}
                       {conv.channel === 'whatsapp' && ` · WhatsApp: ${channels.find(x=>x.id===conv.integration_id)?.name || 'Sem instância vinculada'}`}
                     </p>
@@ -841,10 +899,10 @@ export function InboxPage() {
               <button type="button" className="md:hidden btn-ghost shrink-0 p-2" aria-label="Voltar para conversas"
                 title="Voltar para conversas" onClick={() => setSelectedConv(null)}><ArrowLeft size={20} /></button>
               <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700 flex-shrink-0">
-                {(contact?.name ?? '?').charAt(0).toUpperCase()}
+                {selectedConv.is_group ? <UsersIcon size={21} /> : (contact?.name ?? '?').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <p className="font-medium text-slate-900 truncate">{contact?.name ?? 'Desconhecido'}</p>
+                <p className="font-medium text-slate-900 truncate">{selectedConv.is_group ? (selectedConv.group?.subject || contact?.name || 'Grupo') : (contact?.name ?? 'Desconhecido')}</p>
                 <div className="hidden sm:flex items-center gap-2 mt-0.5 min-w-0">
                   <span className={`badge ${
                     selectedConv.status === 'open' ? 'badge-green' :
@@ -852,6 +910,7 @@ export function InboxPage() {
                   }`}>
                     {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'pending' ? 'Pendente' : 'Fechada'}
                   </span>
+                  {selectedConv.is_group && <span className="text-xs text-slate-600">Grupo{selectedConv.group?.participant_count != null ? ` · ${selectedConv.group.participant_count} membros` : ''}</span>}
                   {selectedChannel && <span className="text-xs text-green-700 rounded bg-green-50 px-2 py-0.5">WhatsApp: {selectedChannel.name} ({selectedChannel.instance_name||'Oficial'})</span>}
                   {memberName(selectedConv.assigned_to) && (
                     <span className="text-xs text-slate-400">{memberName(selectedConv.assigned_to)}</span>
@@ -918,6 +977,9 @@ export function InboxPage() {
                         ? msg.is_bot ? 'bg-purple-100 text-purple-900' : 'bg-blue-600 text-brand-on-accent'
                         : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-100'
                     }`}>
+                      {selectedConv.is_group && !isAgent && <p className="text-xs font-semibold mb-1 opacity-75 break-all">
+                        {msg.group_sender_name || msg.group_sender_jid?.split('@')[0] || 'Participante'}
+                      </p>}
                       {msg.is_bot && (
                         <div className="flex items-center gap-1 mb-1 text-xs opacity-70">
                           <Bot size={12} /> Bot

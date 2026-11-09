@@ -20,6 +20,7 @@ import {
 } from './evolution-media.js';
 
 import { loadEvolution } from './evolution.js';
+import { importEvolutionGroupMessage } from './evolution-group-inbound.js';
 
 import {
   getOrCreateConversation,
@@ -223,11 +224,11 @@ export async function importEvolutionMessage({
 
   const jid = String(key.remoteJid ?? '');
 
-  if (
-    jid.endsWith('@g.us') ||
-    jid.endsWith('@broadcast') ||
-    jid.endsWith('@newsletter')
-  ) {
+  if (jid.endsWith('@g.us')) {
+    return importEvolutionGroupMessage({ orgId, integrationId, item,
+      expectedGroupJid: envelope.expectedGroupJid ?? null, historical });
+  }
+  if (jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) {
     return ignored('ignored_non_private');
   }
 

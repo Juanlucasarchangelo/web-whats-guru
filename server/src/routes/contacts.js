@@ -18,7 +18,7 @@ const contactSchema = z.object({
 const editSchema = contactSchema.partial().refine((obj) => Object.keys(obj).length > 0, 'Informe um campo para atualizar.');
 
 async function authorizedContactWhere(req, contactId) {
-  const base = { id:contactId, org_id:req.orgId };
+  const base = { id:contactId, org_id:req.orgId, is_group:false };
   if (admin(req)) return base;
   const ids=await visibleChannelIds(req);
   return { ...base, OR: [
@@ -45,7 +45,7 @@ export function contactsRouter() {
       const owned=await prisma.integration.findMany({where:{org_id:req.orgId,type:'whatsapp',id:{in:channelIds}},select:{id:true,config:true}});
       scopedIds=owned.filter(ch=>ch.config?.owner_user_id===ownerUserId).map(ch=>ch.id);
     }
-    const base = { org_id: req.orgId };
+    const base = { org_id: req.orgId, is_group: false };
     // Isolamento efetivo no backend, não apenas no seletor do frontend.
     const linked = integrationId ? { integration_id: integrationId } : { integration_id: { in: scopedIds } };
     const linkedToChannel = { OR: [

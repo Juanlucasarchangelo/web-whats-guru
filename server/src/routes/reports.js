@@ -20,8 +20,8 @@ export function reportsRouter(){
   const msgWhere={org_id:req.orgId,conversation_id:{in:convIds},created_at:{gte:start},is_internal:false};
   const [messages,totalContacts,stages,integrations,campaigns,schedules]=await Promise.all([
     convIds.length?prisma.message.findMany({where:msgWhere,select:{conversation_id:true,created_at:true,sender_type:true,is_bot:true},orderBy:[{conversation_id:'asc'},{created_at:'asc'}],take:20000}):[],
-    prisma.contact.count({where:{org_id:req.orgId}}),
-    prisma.contact.groupBy({by:['crm_stage'],where:{org_id:req.orgId},_count:{_all:true}}),
+    prisma.contact.count({where:{org_id:req.orgId,is_group:false}}),
+    prisma.contact.groupBy({by:['crm_stage'],where:{org_id:req.orgId,is_group:false},_count:{_all:true}}),
     prisma.integration.findMany({where:{id:{in:await visibleChannelIds(req)}},select:{id:true,name:true}}),
     prisma.campaign.findMany({where:{org_id:req.orgId,created_at:{gte:start}},select:{id:true,sent_count:true,failed_count:true,status:true}}),
     prisma.schedule.groupBy({by:['status'],where:{org_id:req.orgId,created_at:{gte:start}},_count:{_all:true}}),

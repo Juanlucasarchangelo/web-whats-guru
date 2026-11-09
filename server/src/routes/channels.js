@@ -8,7 +8,8 @@ import { encrypt, providerUrl, providerFetch } from './integrations-restore.js';
 import { configureEvolutionWebhook, getEvolutionWebhookInfo, syncEvolutionStatus } from '../services/evolution.js';
 import { getEvolutionConnectionQr, logoutEvolutionChannel } from '../services/evolution-channel.js';
 import { visibleChannelIds, inboxChannelIds } from '../services/channel-access.js';
-import { getEvolutionBootstrapStatus, queueEvolutionBootstrap } from '../services/evolution-sync.js';
+import { getEvolutionBootstrapStatus, queueEvolutionBootstrap,
+  queueEvolutionGroupDiscovery, getEvolutionGroupStatus } from '../services/evolution-sync.js';
 const id=z.string().uuid();
 const checkAdmin=req=>{if(!isMaster(req))throw new HttpError(403,'Somente Master ou DEV pode alterar acessos a numeros.');};
 const checkOwnAccess=req=>{if(req.user?.global_role==='dev')throw new HttpError(403,'DEV nao conecta WhatsApp. Use Administracao DEV para cadastrar instancias para usuarios.');if(!can(req,'page.inbox'))throw new HttpError(403,'Sem permissao para conectar um WhatsApp.');};
@@ -31,7 +32,8 @@ export function channelsRouter(){
   // Show the real Evolution state, not a cached status changed only in MySQL.
   const data=await Promise.all(rows.map(async row=>{
     const display={...safe(row),owner_name:ownerNames.get(row.config?.owner_user_id)??null,
-      contact_sync:row.config?.provider==='evolution_api'?getEvolutionBootstrapStatus(req.orgId,row.id):undefined};
+      contact_sync:row.config?.provider==='evolution_api'?getEvolutionBootstrapStatus(req.orgId,row.id):undefined,
+      group_sync:row.config?.provider==='evolution_api'?getEvolutionGroupStatus(req.orgId,row.id):undefined};
     if(row.config?.provider!=='evolution_api')return display;
     try{
       const state=await syncEvolutionStatus(req.orgId,row.id);
@@ -67,6 +69,7 @@ export function channelsRouter(){
   let webhook={ok:false,error:null};
   try {webhook=await configureEvolutionWebhook(req.orgId,webhookEndpoint(),integration.id);}
   catch(error){webhook={ok:false,error:String(error.message).slice(0,200)};console.warn('[Channels] Webhook nao configurado:',{instance:data.instance_name,error:error.message});}
+  if (state === 'open') queueEvolutionBootstrap({ orgId: req.orgId, integrationId: integration.id, force: true });
   res.status(201).json({channel:safe(integration),webhook});
  }));
  // Delete only the local integration registration. Preserve conversations and messages.
@@ -105,6 +108,18 @@ export function channelsRouter(){
   const channel=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});
   if(channel?.config?.provider!=='evolution_api')throw new HttpError(404,'Instância Evolution não encontrada.');
   res.status(202).json(queueEvolutionBootstrap({orgId:req.orgId,integrationId:channelId,force:true}));
+ }));
+ router.get('/:id/sync-groups',wrap(async(req,res)=>{
+  const channelId=id.parse(req.params.id);
+  if(!(await inboxChannelIds(req)).includes(channelId))throw new HttpError(404,'Instância sem acesso.');
+  res.json(getEvolutionGroupStatus(req.orgId, channelId));
+ }));
+ router.post('/:id/sync-groups',wrap(async(req,res)=>{
+  const channelId=id.parse(req.params.id);
+  if(!(await inboxChannelIds(req)).includes(channelId))throw new HttpError(404,'Instância sem acesso.');
+  const channel=await prisma.integration.findFirst({where:{id:channelId,org_id:req.orgId,type:'whatsapp'}});
+  if(channel?.config?.provider!=='evolution_api')throw new HttpError(404,'Instância Evolution não encontrada.');
+  res.status(202).json(queueEvolutionGroupDiscovery({orgId:req.orgId,integrationId:channelId,force:true}));
  }));
  router.post('/:id/qr',wrap(async(req,res)=>{
   checkOwnAccess(req);const integrationId=id.parse(req.params.id);

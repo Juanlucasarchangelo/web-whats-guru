@@ -73,6 +73,8 @@ export interface Conversation {
   contact_id: string;
   channel: string;
   integration_id?: string | null;
+  is_group?: boolean;
+  group?: { id:string; jid:string; subject:string; participant_count:number|null } | null;
   status: 'open' | 'pending' | 'closed';
   assigned_to: string | null;
   subject: string | null;
@@ -100,6 +102,8 @@ export interface Message {
   media_mime?: string | null;
   media_name?: string | null;
   media_size?: number | null;
+  group_sender_jid?: string | null;
+  group_sender_name?: string | null;
   media_location?: { latitude: number; longitude: number; name: string; address: string; live: boolean } | null;
   created_at: string;
 }

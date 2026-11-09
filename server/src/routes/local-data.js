@@ -11,6 +11,7 @@ import { publicLocation } from '../services/evolution-media.js';
 import { HttpError, wrap } from '../http.js';
 import { conversationScope, requireConversation, requireAssigneeForChannel, admin, visibleChannelIds } from '../services/channel-access.js';
 import { processTagAdded } from '../services/workflow-engine.js';
+import { validateGroupAutomation } from '../services/group-automation-access.js';
 
 const MODELS = {
   contacts: ['contact', 'name email phone avatar_url crm_stage crm_value custom_fields last_seen_at'],
@@ -70,10 +71,10 @@ async function scopedWhere(req, table, filters, tx = prisma) {
     if(table==='messages'||table==='internal_notes') {
       return {AND:[{...query,org_id:req.orgId},{conversations:await conversationScope(req,tx)}]};
     }
-    if (admin(req)) return { ...query, org_id: req.orgId };
+    if (admin(req)) return { ...query, org_id: req.orgId, ...(table==='contacts'?{is_group:false}:{}) };
     if(table==='contacts') {
       const ids=await visibleChannelIds(req,tx);
-      return {AND:[{...query,org_id:req.orgId},{OR:[
+      return {AND:[{...query,org_id:req.orgId,is_group:false},{OR:[
         {created_by_user_id:req.user.id},
         {contact_integrations:{some:{org_id:req.orgId,integration_id:{in:ids}}}},
         {conversations:{some:{org_id:req.orgId,integration_id:{in:ids}}}},
@@ -124,7 +125,7 @@ function cleanWrite(table, item, op) {
   return cleaned;
 }
 async function belongs(tx, model, id, orgId) {
-  const item = await tx[model].findFirst({ where: { id, org_id: orgId }, select: { id: true } });
+  const item = await tx[model].findFirst({ where: { id, org_id: orgId, ...(model==='contact'?{is_group:false}:{}) }, select: { id: true } });
   if (!item) throw new HttpError(404, 'Referencia nao encontrada nesta empresa.');
 }
 async function validateReferences(tx, table, row, orgId) {
@@ -228,6 +229,7 @@ export function localDataRouter() {
           const item = cleanWrite(table, raw, 'insert');
           enforce(table, item, 'insert');
           await validateReferences(tx, table, item, req.orgId);
+          if (table === 'automations') await validateGroupAutomation(req, item.trigger, item.actions, tx);
           if(!admin(req) && item.conversation_id)await requireConversation(req,item.conversation_id,tx);
           if(!admin(req) && table==='conversation_tags')await requireConversation(req,item.conversation_id,tx);
           if (table === 'messages') {
@@ -297,6 +299,8 @@ export function localDataRouter() {
       const item = cleanWrite(table, values, 'update');
       enforce(table, item, 'update');
       await validateReferences(tx, table, item, req.orgId);
+      if (table === 'automations') for (const old of found)
+        await validateGroupAutomation(req, item.trigger ?? old.trigger, item.actions ?? old.actions, tx);
       if(table==='conversations' && item.assigned_to){
         if(!admin(req) && item.assigned_to!==req.user.id)throw new HttpError(403,'Atendente so pode atribuir conversas a si mesmo.');
         for(const existing of found)await requireAssigneeForChannel(req.orgId,item.assigned_to,existing.integration_id,tx);

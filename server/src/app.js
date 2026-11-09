@@ -14,6 +14,7 @@ import { restoredIntegrationsRouter } from './routes/integrations-restore.js';
 import { errorHandler, wrap } from './http.js';
 import { evolutionWebhookRouter } from './routes/evolution-webhook.js';
 import { operationsRouter } from './routes/operations.js';
+import { groupAutomationsRouter } from './routes/group-automations.js';
 import { profileRouter } from './routes/profile.js';
 import { reportsRouter } from './routes/reports.js';
 import { accessRouter } from './routes/access.js';
@@ -48,7 +49,7 @@ export function createApp(config) {
       await prisma.$queryRaw`SELECT 1 AS ok`;
       const [tables] = await prisma.$queryRaw`SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations'`;
       const count = Number(tables?.total ?? 0);
-      return res.status(count === 28 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 28 });
+      return res.status(count >= 28 ? 200 : 503).json({ api: 'online', mysql: 'connected', tables: count, expected_tables: 28 });
     } catch {
       return res.status(503).json({ api: 'online', mysql: 'disconnected' });
     }
@@ -87,6 +88,7 @@ export function createApp(config) {
     }));
     secure.use('/stalker', requirePermission('page.instagramCrm'), stalkerRouter());
     secure.use('/operations', guardOperations, operationsRouter());
+    secure.use('/group-automations', requirePermission('page.automations'), groupAutomationsRouter());
     secure.use('/profile', requirePermission('page.profile'), profileRouter());
     secure.use('/reports', requirePermission('page.reports'), reportsRouter());
     secure.use('/technical-documents', technicalDocumentsRouter());

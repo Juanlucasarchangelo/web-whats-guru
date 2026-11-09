@@ -2,9 +2,14 @@ import { Router } from 'express';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../db.js';
 import { importEvolutionMessage } from '../services/evolution-inbound.js';
+import { importEvolutionGroupMessage } from '../services/evolution-group-inbound.js';
+import { groupJid } from '../services/evolution-groups-policy.js';
+import { historyCutoff, messageDate } from '../services/evolution-sync-policy.js';
 import { evolutionEventItems, summarizeEvolutionResults } from '../services/evolution-payload.js';
 import { bootstrapOnEvolutionConnection } from '../services/evolution-sync.js';
 import { saveEvolutionReceipt } from '../services/evolution-receipts.js';
+import { upsertEvolutionGroup } from '../services/evolution-groups.js';
+import { queueEvolutionGroupDiscovery } from '../services/evolution-sync.js';
 
 function constantTimeMatch(actual, expected) {
   const a = Buffer.from(String(actual ?? ''));
@@ -57,6 +62,22 @@ export function evolutionWebhookRouter() {
           });
         }
         if (results.length === 0) counts.empty_payload = 1;
+      } else if (event === 'messages.set' || event === 'messaging.history.set') {
+        // Evolution can deliver its initial history through a one-time event.
+        // Store only groups within the agreed 3-month window, without unread
+        // inflation or chatbot triggers. A replay is idempotent by provider ID.
+        const results = [];
+        const cutoff = historyCutoff();
+        for (const item of evolutionEventItems(payload)) {
+          const jid = groupJid(item?.key?.remoteJid ?? item?.data?.key?.remoteJid);
+          if (!jid) continue;
+          const date = messageDate(item);
+          if (!date || date < cutoff) continue;
+          results.push(await importEvolutionGroupMessage({ orgId: integration.org_id,
+            integrationId: integration.id, item, expectedGroupJid: jid, historical: true }));
+        }
+        counts = summarizeEvolutionResults(results);
+        if (!results.length) counts.no_group_messages_in_period = 1;
       } else if (event === 'messages.update') {
         const results = [];
         for (const item of evolutionEventItems(payload)) {
@@ -65,6 +86,16 @@ export function evolutionWebhookRouter() {
         }
         counts = summarizeEvolutionResults(results);
         if (!results.length) counts.empty_payload = 1;
+      } else if (['groups.upsert','groups.update','group.update','group.participants.update'].includes(event)) {
+        const records = evolutionEventItems(payload);
+        let changed = 0;
+        for (const record of records) {
+          if (await upsertEvolutionGroup({ orgId: integration.org_id, integrationId: integration.id,
+            record })) changed++;
+        }
+        counts = { groups_updated: changed };
+        // A participants-only event can omit the subject or group id.
+        if (!changed) queueEvolutionGroupDiscovery({ orgId: integration.org_id, integrationId: integration.id });
       } else if (event === 'connection.update') {
         const state = String(payload?.data?.state ?? payload?.data?.instance?.state ?? '');
         const status = state === 'open' ? 'connected' : state === 'connecting' ? 'connecting' : state === 'close' ? 'disconnected' : null;

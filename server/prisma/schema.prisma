@@ -74,6 +74,8 @@ model Organization {
   technical_documents     TechnicalDocument[]
   technical_counters      TechnicalDocumentCounter[]
   webhook_events          WebhookEvent[]
+  whatsapp_groups         WhatsAppGroup[]
+  group_automation_runs   GroupAutomationExecution[]
 
   @@index([region], map: "idx_organizations_region")
   @@map("organizations")
@@ -142,6 +144,7 @@ model Contact {
   id                  String              @id @default(uuid()) @db.Char(36)
   org_id              String              @db.Char(36)
   name                String              @db.Text
+  is_group            Boolean             @default(false)
   email               String?             @db.Text
   phone               String?             @db.Text
   avatar_url          String?             @db.Text
@@ -198,6 +201,7 @@ model Conversation {
   contact_id        String            @db.Char(36)
   channel           String            @default("whatsapp") @db.VarChar(64)
   integration_id    String?           @db.Char(36)
+  is_group          Boolean           @default(false)
   status            String            @default("open") @db.VarChar(32)
   assigned_to       String?           @db.Char(36)
   subject           String?           @db.Text
@@ -212,10 +216,12 @@ model Conversation {
   organizations     Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_conversations_org")
   internal_notes    InternalNote[]
   messages          Message[]
+  whatsapp_groups   WhatsAppGroup[]
 
   @@index([org_id], map: "idx_conversations_org_id")
   @@index([contact_id], map: "idx_conversations_contact")
   @@index([org_id, integration_id], map: "idx_conversations_integration")
+  @@index([org_id, is_group], map: "idx_conversations_group")
   @@index([org_id, status], map: "idx_conversations_status")
   @@index([org_id, assigned_to], map: "idx_conversations_assigned")
   @@index([assigned_to], map: "fk_conversations_agent")
@@ -231,6 +237,28 @@ model ConversationTag {
   @@id([conversation_id, tag_id])
   @@index([tag_id], map: "idx_conversation_tags_tag")
   @@map("conversation_tags")
+}
+
+// Group identity is independent of personal contacts, scoped by organization and instance.
+// Removing an integration from the panel does not cascade/delete group history.
+model WhatsAppGroup {
+  id                String    @id @default(uuid()) @db.Char(36)
+  org_id            String    @db.Char(36)
+  integration_id    String    @db.Char(36)
+  jid               String    @db.VarChar(120)
+  subject           String    @db.VarChar(255)
+  description       String?   @db.Text
+  participant_count Int?
+  contact_id        String    @db.Char(36)
+  conversation_id   String    @unique(map: "uq_whatsapp_groups_conversation") @db.Char(36)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+  organizations     Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_whatsapp_groups_org")
+  conversations     Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_whatsapp_groups_conversation")
+
+  @@unique([org_id, integration_id, jid], map: "uq_whatsapp_groups_org_instance_jid")
+  @@index([org_id, integration_id], map: "idx_whatsapp_groups_org_instance")
+  @@map("whatsapp_groups")
 }
 
 model Message {
@@ -250,6 +278,8 @@ model Message {
   media_name      String?      @db.VarChar(255)
   media_size      Int?
   media_type      String?      @db.VarChar(32)
+  group_sender_jid  String?      @db.VarChar(120)
+  group_sender_name String?      @db.VarChar(150)
   attachments     Attachment[]
   conversations   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_messages_conversation")
   organizations   Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_messages_org")
@@ -343,12 +373,31 @@ model Automation {
   created_by    String?       @db.Char(36)
   created_at    DateTime     @default(now())
   updated_at    DateTime     @default(now()) @updatedAt
+  group_automation_runs GroupAutomationExecution[]
   users         User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_automations_creator")
   organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_org")
 
   @@index([org_id], map: "idx_automations_org")
   @@index([created_by], map: "idx_automations_creator")
   @@map("automations")
+}
+
+// One execution per group rule and message/day; protects against repeated scheduler ticks.
+model GroupAutomationExecution {
+  id            String    @id @default(uuid()) @db.Char(36)
+  org_id        String    @db.Char(36)
+  automation_id String    @db.Char(36)
+  execution_key String    @db.VarChar(120)
+  status        String    @default("processing") @db.VarChar(24)
+  details       Json?
+  created_at    DateTime  @default(now())
+  finished_at   DateTime?
+  automation    Automation    @relation(fields: [automation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_group_automation_rule")
+  organization  Organization  @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_group_automation_org")
+
+  @@unique([automation_id, execution_key], map: "uq_group_automation_run")
+  @@index([org_id, created_at], map: "idx_group_automation_org_created")
+  @@map("group_automation_executions")
 }
 
 model Campaign {

@@ -7,6 +7,10 @@ import { summarizeEvolutionResults } from './evolution-payload.js';
 import { HttpError } from '../http.js';
 import { HISTORY_PAGE_SIZE, MAX_HISTORY_PAGES, historyCutoff, messageDate, recordsFrom, shouldContinueHistory } from './evolution-sync-policy.js';
 import { linkedHistoryJids, normalizeHistoricalItem } from './evolution-history-policy.js';
+import { groupJid } from './evolution-groups.js';
+import { messageGroupJid, normalizedProviderMessage, evolutionGroupSettings, groupHistoryHints } from './evolution-group-history-policy.js';
+import { requeueGroupMediaArchive } from './evolution-media-archive.js';
+import { importEvolutionGroupMessage } from './evolution-group-inbound.js';
 
 function decodeKey() {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -36,9 +40,9 @@ export async function loadEvolution(orgId, integrationId = null) {
   if (!/^https?:\/\//.test(url) || !/^[\w-]{2,60}$/.test(instance)) throw new HttpError(503, 'URL ou instancia Evolution invalida.');
   return { integration, url, instance, apiKey: decrypt(credentials.access_token) };
 }
-export async function evolutionGet(api, path, method = 'GET', body) {
+export async function evolutionGet(api, path, method = 'GET', body, timeoutMs = 15000) {
   let response;
-  try { response = await fetch(`${api.url}${path}`, { method, headers: { apikey: api.apiKey, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000), redirect: 'error' }); }
+  try { response = await fetch(`${api.url}${path}`, { method, headers: { apikey: api.apiKey, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeoutMs), redirect: 'error' }); }
   catch { throw new HttpError(502, 'Nao foi possivel comunicar com Evolution API. Confira Docker e porta.'); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -62,10 +66,15 @@ export async function sendEvolutionText({ orgId, conversation, text, userId }) {
   if (!api) throw new HttpError(503, 'Evolution nao configurada para esta conversa.');
   const state = await syncEvolutionStatus(orgId, api.integration.id);
   if (state.status !== 'connected') throw new HttpError(409, `Instancia Evolution nao esta conectada (status: ${state.status}).`);
-  const contact = await prisma.contact.findFirst({ where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true } });
-  const phone = String(contact?.phone || '').replace(/\D/g, '');
-  if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato precisa de telefone completo com DDI (ex. 5541999999999).');
-  const result = await evolutionGet(api, `/message/sendText/${encodeURIComponent(api.instance)}`, 'POST', { number: phone, text });
+  const group = await prisma.whatsAppGroup.findFirst({ where: { org_id: orgId, integration_id: api.integration.id, conversation_id: conversation.id } });
+  let destination = group?.jid;
+  if (!destination) {
+    const contact = await prisma.contact.findFirst({ where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true } });
+    const phone = String(contact?.phone || '').replace(/\D/g, '');
+    if (phone.length < 10 || phone.length > 15) throw new HttpError(400, 'Contato precisa de telefone completo com DDI (ex. 5541999999999).');
+    destination = phone;
+  }
+  const result = await evolutionGet(api, `/message/sendText/${encodeURIComponent(api.instance)}`, 'POST', { number: destination, text });
   const providerId = result?.key?.id || result?.id;
   if (!providerId) throw new HttpError(502, 'Evolution nao confirmou o envio; verifique painel do provedor antes de reenviar.');
   const row = await prisma.$transaction(async tx => {
@@ -88,17 +97,33 @@ export async function configureEvolutionWebhook(orgId, endpointUrl, integrationI
     url: endpointUrl,
     webhookByEvents: false,
     webhookBase64: false,
-    events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'MESSAGES_UPDATE'],
+    events: ['MESSAGES_UPSERT', 'MESSAGES_SET', 'CONNECTION_UPDATE', 'MESSAGES_UPDATE',
+      'GROUPS_UPSERT', 'GROUP_UPDATE', 'GROUP_PARTICIPANTS_UPDATE'],
   };
   let contract = 'flat';
   try {
     // Recent Evolution endpoints may accept this shape.
     await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', body);
   } catch (error) {
-    // Some Evolution v2 releases explicitly require { webhook: {...} }.
     if (![400, 404, 422].includes(error?.providerStatus)) throw error;
     contract = 'nested';
-    await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', { webhook: body });
+    try {
+      await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', { webhook: body });
+    } catch (nestedError) {
+      // If this Evolution release rejects group event names, preserve core messaging webhook.
+      if (![400, 422].includes(nestedError?.providerStatus)) throw nestedError;
+      body.events = ['MESSAGES_UPSERT', 'MESSAGES_SET', 'CONNECTION_UPDATE', 'MESSAGES_UPDATE'];
+      try { await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', body); }
+      catch {
+        try { await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', { webhook: body }); }
+        catch {
+          // Preserve live-message delivery even on a provider version without MESSAGES_SET.
+          body.events = ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'MESSAGES_UPDATE'];
+          await evolutionGet(api, `/webhook/set/${encodeURIComponent(api.instance)}`, 'POST', body);
+        }
+      }
+      contract = 'fallback-messages-only';
+    }
   }
   let verified = false;
   try {
@@ -183,6 +208,10 @@ export async function syncEvolutionConversation({ orgId, conversation, onProgres
   if (!conversation.integration_id) throw new HttpError(409, 'Conversa sem numero de WhatsApp vinculado.');
   const api = await loadEvolution(orgId, conversation.integration_id);
   if (!api) throw new HttpError(404, 'Evolution nao configurada para esta conversa.');
+  // A group has its own remoteJid, not a telephone number.
+  const group = await prisma.whatsAppGroup.findFirst({ where: { org_id: orgId,
+    conversation_id: conversation.id, integration_id: api.integration.id } });
+  if (group) return syncEvolutionGroupHistory({ orgId, api, group, onProgress });
   const contact = await prisma.contact.findFirst({
     where: { id: conversation.contact_id, org_id: orgId }, select: { phone: true },
   });
@@ -267,6 +296,185 @@ export async function syncEvolutionConversation({ orgId, conversation, onProgres
     truncated, cutoff: cutoff.toISOString(), synchronized_at: new Date().toISOString() };
 }
 
+/** Evolution 2.3.x sometimes returns an empty page for a valid group JID filter,
+ * even while other messages are available. In that case do a single instance-scoped,
+ * bounded/unfiltered pass, shared by concurrent group jobs. Every returned message
+ * is still validated against its own @g.us JID BEFORE import.
+ *
+ * This does NOT fetch WhatsApp history missing from Evolution's own database.
+ */
+const alternativeGroupScans = new Map();
+const ALTERNATIVE_SCAN_TTL_MS = 60_000;
+async function scanAvailableGroupHistory({ orgId, api, cutoff, onProgress = () => {} }) {
+  const scanKey = `${orgId}:${api.integration.id}`;
+  const cached = alternativeGroupScans.get(scanKey);
+  if (cached && (cached.running || cached.expires > Date.now())) return cached.promise;
+  const state = { running: true, expires: 0, promise: null };
+  state.promise = (async () => {
+    const byJid = new Map();
+    let examined = 0;
+    let groupMessages = 0;
+    let pages = 0;
+    let truncated = false;
+    let previous = null;
+    let completed = false;
+    for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
+      const payload = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`,
+        'POST', { where: {}, page, offset: HISTORY_PAGE_SIZE });
+      const { records, pages: totalPages } = recordsFrom(payload, 'messages');
+      pages++;
+      const fingerprint = records.length
+        ? `${records[0]?.key?.id ?? records[0]?.data?.key?.id}:${records.at(-1)?.key?.id ?? records.at(-1)?.data?.key?.id}:${records.length}`
+        : null;
+      if (page > 1 && fingerprint && fingerprint === previous) { truncated = true; break; }
+      previous = fingerprint;
+      for (const original of records) {
+        examined++;
+        const item = normalizedProviderMessage(original);
+        const jid = messageGroupJid(original);
+        if (!jid) continue;
+        const date = messageDate(item);
+        if (!date || date < cutoff) continue;
+        groupMessages++;
+        const result = await importEvolutionGroupMessage({ orgId, integrationId: api.integration.id,
+          item, expectedGroupJid: jid, historical: true });
+        const counts = byJid.get(jid) || { scanned: 0, counts: {} };
+        counts.scanned++;
+        counts.counts[result.outcome] = (counts.counts[result.outcome] || 0) + 1;
+        byJid.set(jid, counts);
+      }
+      onProgress({ alternative_pages: pages, alternative_examined: examined, alternative_group_messages: groupMessages });
+      const decision = shouldContinueHistory({ records: records.map(normalizedProviderMessage), page,
+        totalPages, cutoff });
+      if (!decision.continue) { completed = true; break; }
+    }
+    if (!completed) truncated = true;
+    return { byJid, examined, pages, groupMessages, truncated };
+  })();
+  alternativeGroupScans.set(scanKey, state);
+  try {
+    const result = await state.promise;
+    state.running = false;
+    state.expires = Date.now() + ALTERNATIVE_SCAN_TTL_MS;
+    return result;
+  } catch (error) {
+    // Do not cache an unsuccessful request; subsequent explicit retry may work.
+    alternativeGroupScans.delete(scanKey);
+    throw error;
+  }
+}
+
+async function readGroupHistorySettings(api) {
+  try {
+    const settings = await evolutionGet(api, `/settings/find/${encodeURIComponent(api.instance)}`);
+    return evolutionGroupSettings(settings);
+  } catch (error) {
+    console.warn('[Evolution Grupos] Não foi possível verificar as configurações da instância:', {
+      integrationId: api.integration.id, status: error?.providerStatus || 'unavailable',
+    });
+    return { sync_full_history: null, groups_ignore: null };
+  }
+}
+
+/** Query one exact group JID; retry through an instance-scoped scan only when
+ * Evolution fails to return messages for the filtered request. */
+async function syncEvolutionGroupHistory({ orgId, api, group, onProgress }) {
+  if (!groupJid(group.jid)) throw new HttpError(409, 'Identificador de grupo inválido.');
+  const cutoff = historyCutoff();
+  const counts = {};
+  let scanned = 0;
+  let pages = 0;
+  let truncated = false;
+  let completed = false;
+  let previous = null;
+  let filteredError = null;
+  let source = 'filtered';
+  for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
+    let payload;
+    try {
+      payload = await evolutionGet(api, `/chat/findMessages/${encodeURIComponent(api.instance)}`,
+        'POST', { where: { key: { remoteJid: group.jid } }, page, offset: HISTORY_PAGE_SIZE });
+    } catch (error) {
+      // Filter failures can be specific to Evolution releases. Try the safe
+      // unfiltered fallback below, but never hide a failure if it also fails.
+      filteredError = error;
+      break;
+    }
+    const { records, pages: totalPages } = recordsFrom(payload, 'messages');
+    pages++;
+    const fingerprint = records.length
+      ? `${records[0]?.key?.id ?? records[0]?.data?.key?.id}:${records.at(-1)?.key?.id ?? records.at(-1)?.data?.key?.id}:${records.length}`
+      : null;
+    if (page > 1 && fingerprint && fingerprint === previous) { truncated = true; break; }
+    previous = fingerprint;
+    for (const original of records) {
+      // Some Evolution versions ignore JID filters. Never mix histories.
+      const item = normalizedProviderMessage(original);
+      if (messageGroupJid(original) !== group.jid) {
+        counts.ignored_other_group = (counts.ignored_other_group || 0) + 1;
+        continue;
+      }
+      scanned++;
+      const date = messageDate(item);
+      if (!date || date < cutoff) {
+        counts.ignored_out_of_period = (counts.ignored_out_of_period || 0) + 1;
+        continue;
+      }
+      const result = await importEvolutionGroupMessage({ orgId, integrationId: api.integration.id,
+        item, expectedGroupJid: group.jid, historical: true });
+      counts[result.outcome] = (counts[result.outcome] || 0) + 1;
+    }
+    onProgress({ scanned, pages, counts: { ...counts }, cutoff: cutoff.toISOString(), group: true });
+    const decision = shouldContinueHistory({ records: records.map(normalizedProviderMessage), page, totalPages, cutoff });
+    if (!decision.continue) { completed = true; break; }
+  }
+  if (!completed && !filteredError) truncated = true;
+
+  let providerScanned = scanned;
+  let alternativePages = 0;
+  let alternativeError = null;
+  if (scanned === 0) {
+    source = 'alternative';
+    try {
+      const found = await scanAvailableGroupHistory({ orgId, api, cutoff, onProgress });
+      const mine = found.byJid.get(group.jid);
+      scanned = mine?.scanned || 0;
+      // The fallback imported group messages directly, so do not replay them.
+      Object.assign(counts, { ...counts, ...(mine?.counts || {}) });
+      alternativePages = found.pages;
+      providerScanned = found.examined;
+      truncated = truncated || found.truncated;
+      onProgress({ scanned, pages: pages + found.pages, counts: { ...counts },
+        alternative_pages: found.pages, alternative_examined: found.examined, group: true });
+    } catch (error) {
+      alternativeError = error;
+      if (filteredError) throw new HttpError(502,
+        'A Evolution não disponibilizou o histórico do grupo: as duas consultas falharam. Confira os logs da API.');
+    }
+  }
+
+  // Recover attachments saved in the database whose download/NAS upload failed
+  // before. Historical duplicates must NOT permanently block a second attempt.
+  const mediaRetry = await requeueGroupMediaArchive({ orgId, integrationId: api.integration.id,
+    conversationId: group.conversation_id, cutoff });
+  const settings = scanned === 0 ? await readGroupHistorySettings(api) : null;
+  const providerWarning = groupHistoryHints(settings, {
+    unfilteredError: alternativeError, partial: truncated,
+  });
+  if (filteredError && scanned === 0) providerWarning.push('A consulta filtrada também falhou na Evolution.');
+  if (scanned === 0 && !providerWarning.length)
+    providerWarning.push('Nenhuma mensagem deste grupo foi encontrada no histórico armazenado pela Evolution.');
+  console.info('[Evolution Grupo Histórico]', { integrationId: api.integration.id,
+    groupId: group.id, scanned, pages: pages + alternativePages, truncated, source,
+    providerScanned, queuedMedia: mediaRetry.queued, counts, providerWarning });
+  return { counts, scanned, pages: pages + alternativePages, truncated, group: true,
+    source, provider_scanned: providerScanned,
+    queued_media: mediaRetry.queued, media_retry_incomplete: mediaRetry.incomplete,
+    provider_warning: providerWarning,
+    provider_settings: settings,
+    cutoff: cutoff.toISOString(), synchronized_at: new Date().toISOString() };
+}
+
 /** Download autenticado da mídia pela Evolution API. */
 export async function fetchEvolutionMedia({ orgId, integrationId, mediaMessage }) {
   const api = await loadEvolution(orgId, integrationId);
@@ -284,7 +492,7 @@ export async function fetchEvolutionMedia({ orgId, integrationId, mediaMessage }
     try {
       const result = await evolutionGet(api, endpoint, 'POST', {
         message: payload, convertToMp4: false,
-      });
+      }, 60000);
       const raw = result?.base64 ?? result?.data?.base64 ??
         result?.response?.base64 ?? result?.data?.data?.base64;
       if (typeof raw !== 'string' || !raw.length) {
