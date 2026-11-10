@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { apiRequest } from '@/lib/api';
 import { Spinner } from '@/components/ui/Spinner';
+import { GroupMultiPicker } from '@/components/automation/GroupMultiPicker';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -11,7 +12,7 @@ import { toastSuccess, toastError, toastWarning } from '@/components/ui/Toast';
 import type { Automation } from '@/types';
 import {
   Zap, Plus, Pencil, Trash2, Play, Pause,
-  Clock, MessageSquare, Tag, UserCheck, Webhook, RefreshCw,
+  Clock, MessageSquare, Tag, UserCheck, Webhook, RefreshCw, X,
 } from 'lucide-react';
 
 const TRIGGER_TYPES: { value: string; label: string }[] = [
@@ -51,6 +52,7 @@ export function AutomationsPage() {
   const [groupRuns, setGroupRuns] = useState<Execution[]>([]);
   const [scheduler, setScheduler] = useState<{last_tick_at:string|null;last_error:string|null;running:boolean}|null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
+  const [manuallyRunning, setManuallyRunning] = useState<string | null>(null);
   const [groupLogError, setGroupLogError] = useState('');
 
   const [name, setName] = useState('');
@@ -66,7 +68,7 @@ export function AutomationsPage() {
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [waitingFor, setWaitingFor] = useState<'group'|'us'>('group');
-  const [summaryTime, setSummaryTime] = useState('20:00');
+  const [summaryTimes, setSummaryTimes] = useState<string[]>(['20:00']);
   const [recipientKind, setRecipientKind] = useState<'contact'|'group'>('contact');
   const [recipientGroup, setRecipientGroup] = useState('');
   const [recipientChannel, setRecipientChannel] = useState('');
@@ -143,7 +145,7 @@ export function AutomationsPage() {
     setTriggerKeyword('');
     setTriggerTag('');
     setActions([]);
-    setSelectedGroup('');setSelectedGroups([]);setWaitingFor('group');setSummaryTime('20:00');
+    setSelectedGroup('');setSelectedGroups([]);setWaitingFor('group');setSummaryTimes(['20:00']);
     setRecipientKind('contact');setRecipientGroup('');setRecipientChannel('');
     setRecipientContact('');setRecipientSearch('');setRecipientContacts([]);
     setShowModal(true);
@@ -162,7 +164,7 @@ export function AutomationsPage() {
     setSelectedGroup(String(trigger?.group_id ?? ''));
     setSelectedGroups(Array.isArray(trigger?.group_ids) ? trigger.group_ids : trigger?.group_id ? [trigger.group_id] : []);
     setWaitingFor(trigger?.waiting_for === 'us' ? 'us' : 'group');
-    setSummaryTime(String(trigger?.time ?? '20:00'));
+    setSummaryTimes(Array.isArray(trigger?.times) && trigger.times.length ? trigger.times : [String(trigger?.time ?? '20:00')]);
     setRecipientKind(trigger?.recipient?.kind === 'group' ? 'group' : 'contact');
     setRecipientGroup(String(trigger?.recipient?.group_id ?? ''));
     setRecipientChannel(String(trigger?.recipient?.integration_id ?? ''));
@@ -184,6 +186,18 @@ export function AutomationsPage() {
     setActions(prev => prev.filter((_, i) => i !== index));
   }
 
+  async function runSummaryNow(auto: Automation) {
+    const ids=(auto.trigger as any)?.group_ids ?? [(auto.trigger as any)?.group_id].filter(Boolean);
+    if(!window.confirm(`Gerar e enviar AGORA um novo resumo para cada um dos ${ids.length} grupos selecionados?\n\nEsta ação enviará novas mensagens, mesmo que já tenham sido enviados resumos hoje.`)) return;
+    setManuallyRunning(auto.id);
+    try {
+      const result=await apiRequest<{group_count:number}>(`/group-automations/${encodeURIComponent(auto.id)}/run-now`,{method:'POST'});
+      toastSuccess(`Solicitação aceita: ${result.group_count} resumos independentes. Acompanhe o histórico de execuções.`);
+      load();
+    } catch(error) {toastError(error instanceof Error?error.message:'Não foi possível iniciar os resumos.');}
+    finally {setManuallyRunning(null);}
+  }
+
   async function handleSave() {
     if (!orgId || !user || !name.trim()) return;
     const isSummary=triggerType==='group_daily_summary';
@@ -191,8 +205,10 @@ export function AutomationsPage() {
     if (!isSummary && !actions.length) { toastWarning('Adicione ao menos uma ação.'); return; }
     if (isGroup && (isSummary ? !selectedGroups.length : !selectedGroup)) { toastWarning('Selecione ao menos um grupo que será monitorado.'); return; }
     if (isSummary) {
-      if (selectedGroups.length > 100) {toastWarning('Selecione no máximo 100 grupos.');return;}
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(summaryTime)) {toastWarning('Informe um horário válido.');return;}
+      if (selectedGroups.length > 1000) {toastWarning('Selecione no máximo 1.000 grupos.');return;}
+      if (summaryTimes.length<1 || summaryTimes.length>24 || summaryTimes.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) || new Set(summaryTimes).size!==summaryTimes.length) {
+        toastWarning('Informe de 1 a 24 horários válidos e diferentes.');return;
+      }
       if (recipientKind==='group'&&!recipientGroup || recipientKind==='contact'&&(!recipientChannel||!recipientContact)) {
         toastWarning('Selecione o grupo ou contato que receberá o resumo.'); return;
       }
@@ -219,7 +235,8 @@ export function AutomationsPage() {
         trigger.waiting_for=waitingFor;
       }
       if (isSummary) {
-        trigger.time=summaryTime;
+        trigger.times=[...summaryTimes].sort();
+        trigger.time=[...summaryTimes].sort()[0]; // compatibilidade com versões anteriores
         trigger.recipient=recipientKind==='group' ? {kind:'group',group_id:recipientGroup} :
           {kind:'contact',contact_id:recipientContact,integration_id:recipientChannel};
       }
@@ -293,7 +310,7 @@ export function AutomationsPage() {
     if (type === 'keyword') return `${found.label}: "${t.keyword}"`;
     if (type === 'tag_added') return `${found.label}: "${t.tag}"`;
     if (type === 'group_no_reply') return `${found.label} · ${t.timeout_minutes} min · ${t.waiting_for==='group'?'aguardando participantes':'aguardando equipe'} · ${groups.find(g=>g.id===t.group_id)?.subject??'Grupo selecionado'}`;
-    if (type === 'group_daily_summary') { const ids=Array.isArray(t.group_ids)?t.group_ids:(t.group_id?[t.group_id]:[]);return `${found.label} · ${t.time} · ${ids.length} grupo(s)`; }
+    if (type === 'group_daily_summary') { const ids=Array.isArray(t.group_ids)?t.group_ids:(t.group_id?[t.group_id]:[]);const times=Array.isArray(t.times)&&t.times.length?t.times:[t.time];return `${found.label} · ${times.join(', ')} · ${ids.length} grupo(s)`; }
     return found.label;
   };
 
@@ -359,6 +376,11 @@ export function AutomationsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {(auto.trigger as any)?.type==='group_daily_summary' && <button type="button" title="Gerar novos resumos agora (pode repetir no mesmo dia)"
+                    disabled={manuallyRunning===auto.id || auto.status!=='active'}
+                    onClick={()=>runSummaryNow(auto)} className="btn-secondary text-xs px-2 py-1.5 disabled:opacity-40">
+                    {manuallyRunning===auto.id?'Iniciando...':'Gerar agora'}
+                  </button>}
                   <button onClick={() => toggleStatus(auto)} className="btn-ghost px-2 py-1.5">
                     {auto.status === 'active' ? <Pause size={16} /> : <Play size={16} />}
                   </button>
@@ -443,17 +465,7 @@ export function AutomationsPage() {
                 </div>
               )}
               {triggerType === 'group_daily_summary' && (
-                <div>
-                  <label className="label">Grupos que esta automação vai monitorar * ({selectedGroups.length} selecionado(s))</label>
-                  <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-300 p-3 space-y-2">
-                    {groups.map(g=><label key={g.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={e=>setSelectedGroups(prev=>e.target.checked ? [...prev,g.id] : prev.filter(id=>id!==g.id))} />
-                      <span>{g.subject} · {channels.find(c=>c.id===g.integration_id)?.name??'WhatsApp'}</span>
-                    </label>)}
-                    {groups.length===0 && <p className="text-sm text-amber-600">Nenhum grupo disponível nas instâncias autorizadas.</p>}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">Cada grupo terá um resumo e uma mensagem separados, usando as mesmas instruções e horário. Máximo de 100 grupos.</p>
-                </div>
+                <GroupMultiPicker selected={selectedGroups} onChange={setSelectedGroups} channels={channels} />
               )}
               {triggerType === 'group_no_reply' && (
                 <div>
@@ -490,8 +502,21 @@ export function AutomationsPage() {
               )}
               {triggerType === 'group_daily_summary' && (
                 <div className="space-y-3">
-                  <div><label className="label">Horário diário do resumo (São Paulo) *</label>
-                    <input type="time" value={summaryTime} onChange={e=>setSummaryTime(e.target.value)} className="input" />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="label mb-0">Horários diários dos resumos (São Paulo) *</label>
+                      <button type="button" className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2.5" disabled={summaryTimes.length>=24}
+                        onClick={()=>setSummaryTimes(prev=>[...prev, ''])}>
+                        <Plus size={15}/> Adicionar horário
+                      </button>
+                    </div>
+                    {summaryTimes.map((time,index)=><div key={index} className="flex items-center gap-2">
+                      <input type="time" aria-label={`Horário ${index+1}`} value={time} onChange={e=>setSummaryTimes(prev=>prev.map((t,i)=>i===index?e.target.value:t))} className="input flex-1" />
+                      <button type="button" className="rounded-lg border border-slate-200 p-2.5 text-slate-500 hover:text-red-600 disabled:opacity-30"
+                        aria-label={`Remover horário ${index+1}`} disabled={summaryTimes.length===1}
+                        onClick={()=>setSummaryTimes(prev=>prev.filter((_,i)=>i!==index))}><X size={17}/></button>
+                    </div>)}
+                    <p className="text-xs text-slate-500">Até 24 horários diferentes. Cada grupo recebe um resumo independente em cada horário configurado.</p>
                   </div>
                   <div><label className="label">Enviar o resumo para *</label>
                     <select className="input" value={recipientKind} onChange={e=>setRecipientKind(e.target.value as 'group'|'contact')}>
@@ -526,7 +551,7 @@ export function AutomationsPage() {
                       </div>
                     </>
                   )}
-                  <p className="text-xs text-slate-500">O resumo será curto: decisões, pontos de atenção e próximos passos. Apenas as mensagens deste grupo e deste dia serão analisadas pela IA.</p>
+                  <p className="text-xs text-slate-500">O resumo será executivo e separado por grupo e horário. A IA analisa somente as mensagens do grupo no dia da execução.</p>
                 </div>
               )}
             </div>
@@ -534,7 +559,7 @@ export function AutomationsPage() {
 
           {triggerType==='group_daily_summary' ? (
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200 text-sm text-slate-700">
-              <strong>Ação automática:</strong> gerar resumo com IA e enviar somente ao destinatário selecionado. Não dispara para outros grupos.
+              <strong>Ação automática:</strong> gerar um resumo por grupo, em cada horário cadastrado, enviando somente ao destinatário escolhido. Nunca mistura os grupos.
             </div>
           ) : <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
             <div className="flex items-center justify-between mb-3">

@@ -37,13 +37,13 @@ function resolveStoredPath(relativePath) {
 }
 
 /** Private: <instancia>/<contato>/original.ext
- * Group: <instancia>/<data - nome do grupo - jid>/original.ext
+ * Group: <instancia>/<nome do grupo>/<data - autor ou nome original.ext>
  */
 export async function saveMedia({ instance, contact, groupId = null, filename, buffer }) {
   if (!Buffer.isBuffer(buffer)) throw new Error('O arquivo deve ser um Buffer.');
   const root = getStorageRoot();
   const folder = groupId
-    ? path.join(root, safeFolderName(instance), safeFolderName(`${contact} - ${groupId}`))
+    ? path.join(root, safeFolderName(instance), safeFolderName(contact))
     : path.join(root, safeFolderName(instance), safeFolderName(contact));
   await fs.mkdir(folder, { recursive: true });
   const original = safeMediaFilename(filename);

@@ -42,7 +42,7 @@ const INTEGRATION_TYPES = [
 ];
 
 export function SettingsPage() {
-  const { currentOrg,currentMembership , can} = useOrg();
+  const { currentOrg, currentMembership, can } = useOrg();
   const orgId = currentOrg?.id;
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -189,9 +189,11 @@ export function SettingsPage() {
   async function handleSaveAIInstructions() {
     setConfigSaving(true);
     try {
-      await apiRequest('/integrations/ai/instructions', { method: 'POST', body: JSON.stringify({
-        summary_instructions: configForm.summary_instructions || '',
-      }) });
+      await apiRequest('/integrations/ai/instructions', {
+        method: 'POST', body: JSON.stringify({
+          summary_instructions: configForm.summary_instructions || '',
+        })
+      });
       toastSuccess('Instruções dos resumos salvas para esta empresa.');
       await load();
     } catch (err) {
@@ -292,7 +294,7 @@ export function SettingsPage() {
 
       {activeTab === 'integrations' && (
         <div className="space-y-4">
-          <ChannelsPanel canManage={can('settings.manage')} />
+          <ChannelsPanel canManage={can('settings.manage')} canDelete={can('channels.delete') && ['dev', 'master', 'administrador'].includes(currentMembership?.role ?? '')} deleteOwnOnly={currentMembership?.role === 'administrador'} />
           {INTEGRATION_TYPES.map(integType => {
             const Icon = integType.icon;
             const existing = integrations.find(i => i.type === integType.type && (integType.type !== 'whatsapp' || (i.config as Record<string, unknown>)?.connection_mode === 'official'));

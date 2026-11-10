@@ -7,13 +7,24 @@ export function summaryGroupIds(trigger) {
   if (Array.isArray(trigger.group_ids)) return trigger.group_ids;
   return trigger.group_id ? [trigger.group_id] : [];
 }
-export function summaryExecutionKey(rule, day, groupId) {
-  // A new saved revision allows retry after a failure without destroying audit records.
-  return `daily:${day}:${groupId}:${new Date(rule.updated_at).getTime()}`;
+export function summaryTimes(trigger) {
+  // Existing automations store only `time`. Do not require a DB migration.
+  if (Array.isArray(trigger?.times)) return trigger.times;
+  return trigger?.time ? [trigger.time] : [];
 }
-export function summaryAlreadyDelivered(rows, groupId, legacyGroupId) {
-  return rows.some(row => row.status === 'completed' &&
-    (row.details?.group_id === groupId || (row.execution_key === legacyGroupId && row.details?.group_id == null)));
+export function summaryExecutionKey(rule, day, groupId, scheduledTime = summaryTimes(rule.trigger)[0] || '00:00') {
+  // Independent per-group/per-time slots. Edits allow retries after a failure.
+  return `daily:${day}:${groupId}:${scheduledTime}:${new Date(rule.updated_at).getTime()}`;
+}
+export function summaryAlreadyDelivered(rows, groupId, legacyGroupId, scheduledTime, firstTime) {
+  return rows.some(row => {
+    if (row.status !== 'completed' || !(row.details?.group_id === groupId ||
+      (row.execution_key === legacyGroupId && row.details?.group_id == null))) return false;
+    // Before this upgrade there was one summary per day, without a time field.
+    // Map those successes to the first configured slot only, not every slot.
+    if (!row.details?.scheduled_time) return !scheduledTime || scheduledTime === (firstTime || scheduledTime);
+    return !scheduledTime || row.details.scheduled_time === scheduledTime;
+  });
 }
 export const validSummaryTime = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 export function groupTriggerError(trigger, actions) {
@@ -21,8 +32,8 @@ export function groupTriggerError(trigger, actions) {
   if (trigger.type === 'group_no_reply' && !validUuid(trigger.group_id)) return 'Selecione o grupo a monitorar.';
   if (trigger.type === 'group_daily_summary') {
     const ids=summaryGroupIds(trigger);
-    if (!ids.length || ids.length > 100 || ids.some(id=>!validUuid(id)) || new Set(ids).size!==ids.length)
-      return 'Selecione de 1 a 100 grupos válidos, sem duplicatas.';
+    if (!ids.length || ids.length > 1000 || ids.some(id=>!validUuid(id)) || new Set(ids).size!==ids.length)
+      return 'Selecione de 1 a 1000 grupos válidos, sem duplicatas.';
   }
   if (trigger.type === 'group_no_reply') {
     if (!Number.isInteger(trigger.timeout_minutes) || trigger.timeout_minutes < 1 || trigger.timeout_minutes > 10080)
@@ -36,7 +47,9 @@ export function groupTriggerError(trigger, actions) {
       if (item.type === 'replace_tag' && (typeof item.old_tag !== 'string' || !item.old_tag.trim() || item.old_tag.length > 160)) return 'Informe a etiqueta a substituir.';
     }
   } else {
-    if (!validSummaryTime(trigger.time)) return 'Informe o horário do resumo (HH:mm).';
+    const times=summaryTimes(trigger);
+    if (times.length<1 || times.length>24 || times.some(t=>!validSummaryTime(t)) || new Set(times).size!==times.length)
+      return 'Informe de 1 a 24 horários válidos (HH:mm), sem duplicatas.';
     if (!trigger.recipient || !['group','contact'].includes(trigger.recipient.kind)) return 'Selecione o grupo ou contato que receberá o resumo.';
     if (trigger.recipient.kind === 'group' && !validUuid(trigger.recipient.group_id)) return 'Selecione o grupo destinatário.';
     if (trigger.recipient.kind === 'contact' && (!validUuid(trigger.recipient.contact_id) || !validUuid(trigger.recipient.integration_id)))

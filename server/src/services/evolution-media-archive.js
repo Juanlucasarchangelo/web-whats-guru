@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
 import { loadEvolution, fetchEvolutionMedia } from './evolution.js';
 import { saveMedia } from './nas-storage.js';
+import { groupArchiveFilename } from './evolution-group-media-naming.js';
 
 const recordedStorageFaults = new Map();
 const NAS_ERRORS = new Set(['ENOENT','EACCES','EPERM','ENOSPC','EROFS','ETIMEDOUT','EHOSTUNREACH','ENOTCONN','ECONNRESET','EIO','EBUSY']);
@@ -20,11 +21,6 @@ async function auditStorageFailure({ orgId, integrationId, error }) {
 export { originalMediaFilename } from './evolution-media-file-policy.js';
 import { originalMediaFilename } from './evolution-media-file-policy.js';
 
-function messageFolderDate(value) {
-  const parts = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo',
-    day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(value)).split('/');
-  return parts.join('-');
-}
 
 export async function archiveEvolutionMedia({ orgId, conversation, message, bytes }) {
   if (!process.env.FALACOMIGO_STORAGE_PATH || message?.media_type === 'location') return null;
@@ -35,7 +31,7 @@ export async function archiveEvolutionMedia({ orgId, conversation, message, byte
     conversation_id: conversation.id, integration_id: conversation.integration_id } });
   let contactFolder;
   if (group) {
-    contactFolder = `${messageFolderDate(message.created_at)} - ${group.subject}`;
+    contactFolder = group.subject || group.jid;
   } else {
     const contact = await prisma.contact.findFirst({ where: { id: conversation.contact_id, org_id: orgId },
       select: { phone: true, name: true } });
@@ -45,7 +41,8 @@ export async function archiveEvolutionMedia({ orgId, conversation, message, byte
   let saved;
   try {
     saved = await saveMedia({ instance: String(api.integration?.name || api.instance),
-      contact: contactFolder, groupId: group?.jid || null, filename: originalMediaFilename(message), buffer: bytes });
+      contact: contactFolder, groupId: group?.jid || null,
+      filename: group ? groupArchiveFilename(message) : originalMediaFilename(message), buffer: bytes });
   } catch (error) {
     await auditStorageFailure({ orgId, integrationId: conversation.integration_id, error });
     throw error;

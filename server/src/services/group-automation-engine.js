@@ -8,11 +8,13 @@ import { getOrCreateConversation, withConversationIdentityLock } from './convers
 import { executeGroupAutomationAction } from './workflow-engine.js';
 import { inboxChannelIds } from './channel-access.js';
 import { normalizeRole } from './permissions.js';
-import { eligibleGroupSilence, awaitingSide, groupRuleType, groupTriggerError, summaryGroupIds, summaryExecutionKey, summaryAlreadyDelivered, zonedDay } from './group-automation-policy.js';
+import { eligibleGroupSilence, awaitingSide, groupRuleType, groupTriggerError, summaryGroupIds, summaryTimes, summaryExecutionKey, summaryAlreadyDelivered, zonedDay } from './group-automation-policy.js';
 
 let running=false;
 let lastTickAt=null;
 let lastTickError=null;
+let lastAutoDiagnosticAt=0;
+const manualActive=new Set(); // only one manual job per rule in this process
 export function groupSchedulerStatus() { return {last_tick_at:lastTickAt, last_error:lastTickError, running}; }
 const TIME_ZONE='America/Sao_Paulo';
 const logError=e=>String(e?.message || e).slice(0,600);
@@ -89,16 +91,15 @@ async function runSilence(rule,group,now) {
     console.error('[Group automation] Ações não concluídas (sem retentativa automática):',logError(error));
   }
 }
-async function runDaily(rule,group,now,authorized) {
+async function runDaily(rule,group,now,authorized,scheduledTime,previous,manualId=null) {
   const {day,clock}=zonedDay(now,TIME_ZONE);
-  if(clock<rule.trigger.time) return;
-  // An activation after today's requested hour starts on the next day, never retroactively.
+  if(!manualId && clock<scheduledTime) return;
+  // An activation after a scheduled hour never sends that slot retroactively.
   const activated=zonedDay(rule.updated_at,TIME_ZONE);
-  if(activated.day===day && activated.clock>rule.trigger.time) return;
-  // Successful deliveries are immutable for the day; failed attempts may be retried after editing.
-  const previous=await prisma.groupAutomationExecution.findMany({where:{automation_id:rule.id,execution_key:{startsWith:`daily:${day}`}},select:{execution_key:true,status:true,details:true}});
-  if(summaryAlreadyDelivered(previous,group.id,`daily:${day}`)) return;
-  const run=await claim(rule,summaryExecutionKey(rule,day,group.id)); if(!run) return;
+  if(!manualId && activated.day===day && activated.clock>scheduledTime) return;
+  // Each group and time has its own delivery record. Failures need a saved edit to retry.
+  if(!manualId && summaryAlreadyDelivered(previous,group.id,`daily:${day}`,scheduledTime,summaryTimes(rule.trigger)[0])) return;
+  const run=await claim(rule,manualId ? `manual:${manualId}:${group.id}` : summaryExecutionKey(rule,day,group.id,scheduledTime)); if(!run) return;
   try {
     const rows=await prisma.message.findMany({where:{org_id:rule.org_id,conversation_id:group.conversation_id,
       is_internal:false,created_at:{gte:new Date(now.getTime()-36*60*60*1000),lte:now}},
@@ -114,15 +115,59 @@ async function runDaily(rule,group,now,authorized) {
     }
     const target=await destinationConversation(rule.org_id,destination);
     if(!target) throw Error('Destino sem conversa WhatsApp válida.');
-    const text=`📋 *RESUMO DO DIA* · ${group.subject}\n🗓️ ${day.split('-').reverse().join('/')} · ${today.length} mensagem(ns)\n\n${summary}`;
+    const text=`📋 *${manualId?'RESUMO SOB DEMANDA':'RESUMO DO DIA'}* · ${group.subject}\n🗓️ ${day.split('-').reverse().join('/')} · ${scheduledTime} (São Paulo) · ${today.length} mensagem(ns)\n\n${summary}`;
     const message=await sendEvolutionText({orgId:rule.org_id,conversation:target,text:text.slice(0,6500),userId:null});
     await prisma.message.update({where:{id:message.id},data:{sender_type:'bot',is_bot:true}});
-    await finish(run,'completed',{group_id:group.id,destination:rule.trigger.recipient.kind,day,count:today.length,message_id:message.id});
+    await finish(run,'completed',{group_id:group.id,scheduled_time:manualId?null:scheduledTime,manual:!!manualId,destination:rule.trigger.recipient.kind,day,count:today.length,message_id:message.id});
   } catch(error) {
-    await finish(run,'failed',{group_id:group.id,error:logError(error),review_before_retry:true});
+    await finish(run,'failed',{group_id:group.id,scheduled_time:manualId?null:scheduledTime,manual:!!manualId,error:logError(error),review_before_retry:true});
     console.error('[Group summary] Resumo não enviado / exige revisão:',logError(error));
   }
 }
+/** Explicit user-triggered summaries. A new batch ID means unlimited on-demand runs,
+ * while scheduled slots remain idempotent. Runs are always audited by group. */
+export async function runManualSummaries(orgId, automationId, requester) {
+  const rule=await prisma.automation.findFirst({where:{id:automationId,org_id:orgId}});
+  if(!rule || rule.trigger?.type!=='group_daily_summary') throw Error('Automação de resumo não encontrada.');
+  if(rule.status!=='active') throw Error('Ative a automação antes de gerar os resumos.');
+  const failure=groupTriggerError(rule.trigger,rule.actions);
+  if(failure) throw Error(failure);
+  if(manualActive.has(rule.id)) throw Error('Já existe um lote manual em andamento nesta automação.');
+  const authorized=await runtimeChannelIds(rule);
+  if(!authorized.length) throw Error('Criador sem autorização para executar esta automação.');
+  // The caller's access can be narrower than the rule creator's.
+  const requesterChannels=await inboxChannelIds(requester);
+  const ids=summaryGroupIds(rule.trigger);
+  const groups=await prisma.whatsAppGroup.findMany({where:{org_id:orgId,id:{in:ids}},select:{id:true,integration_id:true}});
+  if(groups.length!==ids.length || groups.some(g=>!requesterChannels.includes(g.integration_id)))
+    throw Error('Há grupos que não estão autorizados para o usuário atual.');
+  const recipient=rule.trigger.recipient;
+  if(recipient.kind==='contact' && !requesterChannels.includes(recipient.integration_id))
+    throw Error('Instância de destino não autorizada para o usuário atual.');
+  if(recipient.kind==='group') {
+    const dest=await prisma.whatsAppGroup.findFirst({where:{org_id:orgId,id:recipient.group_id},select:{integration_id:true}});
+    if(!dest || !requesterChannels.includes(dest.integration_id)) throw Error('Grupo de destino não autorizado.');
+  }
+  const batchId=randomUUID();
+  manualActive.add(rule.id);
+  // Respond immediately; processing continues sequentially and is recorded in the execution log.
+  void (async()=>{
+    try {
+      for(const groupId of ids) {
+        const group=await activeGroup({...rule,trigger:{...rule.trigger,group_id:groupId}},authorized);
+        if(!group) {
+          const run=await claim(rule,`manual:${batchId}:${groupId}`);
+          if(run) await finish(run,'failed',{group_id:groupId,manual:true,error:'Grupo ou instância indisponível.'});
+          continue;
+        }
+        await runDaily(rule,group,new Date(),authorized,zonedDay(new Date(),TIME_ZONE).clock,[],batchId);
+      }
+    } catch(error) {console.error('[Group summary] Lote manual interrompido:',logError(error));}
+    finally {manualActive.delete(rule.id);}
+  })();
+  return {batch_id:batchId,group_count:ids.length};
+}
+
 // A diagnostic is deliberately read-only with respect to WhatsApp and automation actions.
 // One mutable row per rule/day keeps the audit useful without a log entry every 30 seconds.
 async function diagnoseRule(rule, now, groupId=rule.trigger.group_id) {
@@ -149,15 +194,21 @@ async function diagnoseRule(rule, now, groupId=rule.trigger.group_id) {
     return {status:'ready',reason:'Prazo atingido; o próximo ciclo do executor deve processar a ação.',group:group.subject,last_message_at:last.created_at};
   }
   const {day,clock}=zonedDay(now,TIME_ZONE);
+  const times=[...summaryTimes(rule.trigger)].sort();
   const previous=await prisma.groupAutomationExecution.findMany({where:{automation_id:rule.id,execution_key:{startsWith:`daily:${day}`}},select:{execution_key:true,status:true,details:true}});
-  if(summaryAlreadyDelivered(previous,group.id,`daily:${day}`)) return {status:'completed',reason:'Resumo deste grupo já enviado hoje.',group:group.subject};
-  const key=summaryExecutionKey(rule,day,group.id);
-  const prior=previous.find(r=>r.execution_key===key);
-  if(prior) return {status:prior.status==='failed'?'failed':'processing',reason:prior.status==='failed'?'Tentativa falhou; edite e salve para permitir nova execução.':'Resumo em processamento.',group:group.subject,execution_error:prior.details?.error};
-  if(clock<rule.trigger.time) return {status:'waiting',reason:`Aguardando horário ${rule.trigger.time} (São Paulo).`,group:group.subject};
   const activated=zonedDay(rule.updated_at,TIME_ZONE);
-  if(activated.day===day && activated.clock>rule.trigger.time) return {status:'waiting',reason:'Automação ativada/editada após o horário de hoje; primeiro resumo será no próximo dia.',group:group.subject};
-  return {status:'ready',reason:'Horário do resumo atingido; aguardando execução do agendador.',group:group.subject};
+  let completedCount=0;
+  for(const time of times) {
+    if(summaryAlreadyDelivered(previous,group.id,`daily:${day}`,time,times[0])) {completedCount++;continue;}
+    const key=summaryExecutionKey(rule,day,group.id,time);
+    const prior=previous.find(r=>r.execution_key===key);
+    if(prior) return {status:prior.status==='failed'?'failed':'processing',reason:prior.status==='failed'?`Resumo das ${time} falhou; edite e salve para tentar novamente.`:`Resumo das ${time} em processamento.`,group:group.subject,execution_error:prior.details?.error};
+    if(clock<time) return {status:'waiting',reason:`Aguardando próximo resumo às ${time} (São Paulo). ${completedCount} concluído(s) hoje.`,group:group.subject};
+    if(activated.day===day && activated.clock>time) continue;
+    return {status:'ready',reason:`Resumo das ${time} pronto para o próximo ciclo do executor.`,group:group.subject};
+  }
+  if(completedCount===times.length) return {status:'completed',reason:`Todos os ${times.length} horários concluídos neste grupo hoje.`,group:group.subject};
+  return {status:'waiting',reason:'Horários anteriores à última edição não serão executados retroativamente; próximo resumo no horário futuro.',group:group.subject};
 }
 
 async function storeDiagnostic(rule, result, now, groupId) {
@@ -166,13 +217,14 @@ async function storeDiagnostic(rule, result, now, groupId) {
   await prisma.groupAutomationExecution.upsert({where:{automation_id_execution_key:{automation_id:rule.id,execution_key:`diagnostic:${day}:${groupId || rule.trigger.group_id}`}},
     create:{id:randomUUID(),org_id:rule.org_id,automation_id:rule.id,execution_key:`diagnostic:${day}:${groupId || rule.trigger.group_id}`,...data},update:data});
 }
-export async function diagnoseGroupAutomations(orgId, now=new Date()) {
+export async function diagnoseGroupAutomations(orgId, now=new Date(), maxGroups=Infinity) {
   const rules=await prisma.automation.findMany({where:{org_id:orgId},orderBy:{created_at:'asc'},take:500});
   const results=[];
   for(const rule of rules) {
     if(!groupRuleType(rule.trigger)) continue;
     const ids=rule.trigger.type==='group_daily_summary'?summaryGroupIds(rule.trigger):[rule.trigger.group_id];
     for(const groupId of ids) {
+      if(results.length>=maxGroups) return results;
       let result;
       try { result=await diagnoseRule(rule,now,groupId); }
       catch(error) { result={status:'failed',reason:`Erro ao verificar: ${logError(error)}`}; }
@@ -198,12 +250,22 @@ export async function groupAutomationTick(now=new Date()) {
       try {
         const authorized=await runtimeChannelIds(rule); if(!authorized.length) continue;
         const ids=rule.trigger.type==='group_daily_summary'?summaryGroupIds(rule.trigger):[rule.trigger.group_id];
+        // Fetch the day's deliveries once per automation, not once per group/time.
+        const daily=rule.trigger.type==='group_daily_summary';
+        const day=zonedDay(now,TIME_ZONE).day;
+        const previous=daily ? await prisma.groupAutomationExecution.findMany({
+          where:{automation_id:rule.id,execution_key:{startsWith:`daily:${day}`}},
+          select:{execution_key:true,status:true,details:true}
+        }) : [];
         for(const groupId of ids) {
           try {
             const group=await activeGroup({...rule,trigger:{...rule.trigger,group_id:groupId}},authorized);
             if(!group) continue;
             if(rule.trigger.type==='group_no_reply') await runSilence(rule,group,now);
-            else await runDaily(rule,group,now,authorized);
+            else {
+              for(const time of [...summaryTimes(rule.trigger)].sort())
+                await runDaily(rule,group,now,authorized,time,previous);
+            }
           } catch(groupError) {
             console.error('[Group automation] Falha no grupo:',rule.id,groupId,logError(groupError));
           }
@@ -214,11 +276,15 @@ export async function groupAutomationTick(now=new Date()) {
         catch(logFailure) { console.error('[Group automation] Falha ao registrar erro:',logError(logFailure)); }
       }
     }
-    // Persist why active rules did not execute, including permission, timing and group state.
-    const orgIds=[...new Set(rules.filter(r=>groupRuleType(r.trigger)).map(r=>r.org_id))];
-    for(const orgId of orgIds) {
-      try { await diagnoseGroupAutomations(orgId,now); }
-      catch(error) { console.error('[Group automation] Falha ao registrar diagnóstico:',logError(error)); }
+    // Automatic diagnostics are sampled and throttled so 500+ groups do not
+    // create thousands of DB writes each scheduler tick. Manual diagnostics stay complete.
+    if(now.getTime()-lastAutoDiagnosticAt>=15*60*1000) {
+      lastAutoDiagnosticAt=now.getTime();
+      const orgIds=[...new Set(rules.filter(r=>groupRuleType(r.trigger)).map(r=>r.org_id))];
+      for(const orgId of orgIds) {
+        try { await diagnoseGroupAutomations(orgId,now,50); }
+        catch(error) { console.error('[Group automation] Falha ao registrar diagnóstico:',logError(error)); }
+      }
     }
   } catch(error) { lastTickError=logError(error); throw error; }
   finally { running=false; }

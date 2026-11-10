@@ -58,3 +58,20 @@ test('edits create retry key for failures; completed send suppresses duplicates'
  assert.equal(summaryAlreadyDelivered([{status:'completed',execution_key:key,details:{group_id:gid}}],gid,'daily:2026-11-09'),true);
  assert.equal(summaryAlreadyDelivered([{status:'completed',execution_key:key,details:{group_id:gid}}],rid,'daily:2026-11-09'),false);
 });
+
+test('multiple daily times accepted; invalid and repeated times rejected',()=>{
+ const base={type:'group_daily_summary',group_ids:[gid,rid],times:['09:00','12:00','18:00'],recipient:{kind:'contact',contact_id:rid,integration_id:iid}};
+ assert.equal(groupTriggerError(base,[{type:'ai_daily_summary'}]),null);
+ assert.match(groupTriggerError({...base,times:['09:00','09:00']},[{type:'ai_daily_summary'}]),/duplicatas/);
+ assert.match(groupTriggerError({...base,times:[]},[{type:'ai_daily_summary'}]),/horários/);
+ assert.match(groupTriggerError({...base,times:['25:01']},[{type:'ai_daily_summary'}]),/horários/);
+});
+test('scheduled time keys are unique; one success never blocks another slot',()=>{
+ const rule={trigger:{times:['09:00','18:00']},updated_at:new Date('2026-11-09T05:00:00.000Z')};
+ const morning=summaryExecutionKey(rule,'2026-11-09',gid,'09:00');
+ const evening=summaryExecutionKey(rule,'2026-11-09',gid,'18:00');
+ assert.notEqual(morning,evening);
+ const rows=[{execution_key:morning,status:'completed',details:{group_id:gid,scheduled_time:'09:00'}}];
+ assert.equal(summaryAlreadyDelivered(rows,gid,'daily:2026-11-09','09:00','09:00'),true);
+ assert.equal(summaryAlreadyDelivered(rows,gid,'daily:2026-11-09','18:00','09:00'),false);
+});

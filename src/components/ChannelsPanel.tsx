@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiRequest } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { Modal } from '@/components/ui/Modal';
 import { toastError, toastSuccess } from '@/components/ui/Toast';
 import {
@@ -27,7 +28,8 @@ function ChannelStatus({ channel }: { channel: Channel }) {
   return <span className="badge badge-gray"><Unplug size={12} /> Desconectado</span>;
 }
 
-export function ChannelsPanel({ canManage = true, canConnect = false, canDelete = false, ownOnly = false, onChannelsChanged }: { canManage?: boolean; canConnect?: boolean; canDelete?: boolean; ownOnly?: boolean; onChannelsChanged?: () => void }) {
+export function ChannelsPanel({ canManage = true, canConnect = false, canDelete = false, deleteOwnOnly = false, ownOnly = false, onChannelsChanged }: { canManage?: boolean; canConnect?: boolean; canDelete?: boolean; deleteOwnOnly?: boolean; ownOnly?: boolean; onChannelsChanged?: () => void }) {
+  const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -271,7 +273,7 @@ export function ChannelsPanel({ canManage = true, canConnect = false, canDelete 
               <button type="button" className="btn-secondary text-xs" disabled={busyId===channel.id || ['queued','running'].includes(syncJobs[channel.id]?.status||'')} onClick={()=>void syncContacts(channel)}><RefreshCw size={14}/> Sincronizar contatos</button>
             </div>
           </div>
-          {canDelete && <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+          {canDelete && (!deleteOwnOnly || channel.owner_user_id === user?.id) && <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-slate-500">Remove o cadastro da instância, mas mantém conversas e mensagens. Não apaga a instância no servidor Evolution.</p>
             <button type="button" className="btn-secondary text-xs text-red-700" disabled={busyId === channel.id} onClick={() => void removeInstance(channel)}><Trash2 size={14}/> Excluir instância do painel</button>
           </div>}

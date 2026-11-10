@@ -80,6 +80,9 @@ export function channelsRouter(){
   const integrationId=id.parse(req.params.id);
   const row=await prisma.integration.findFirst({where:{id:integrationId,org_id:req.orgId,type:'whatsapp'}});
   if(!row)throw new HttpError(404,'Instância não encontrada.');
+  // Administrador pode remover somente instâncias cadastradas por ele.
+  if(req.role==='administrador' && row.config?.owner_user_id !== req.user.id)
+    throw new HttpError(403,'Administrador só pode remover as próprias instâncias.');
   if (['queued','running'].includes(getEvolutionBootstrapStatus(req.orgId,integrationId).status))
     throw new HttpError(409,'Sincronização em andamento. Aguarde a conclusão antes de remover a instância.');
   const confirmation=z.object({confirm_instance:z.string().min(1)}).strict().parse(req.body);
