@@ -23,6 +23,7 @@ const TRIGGER_TYPES: { value: string; label: string }[] = [
   { value: 'tag_added', label: 'Etiqueta adicionada' },
   { value: 'group_no_reply', label: 'Grupo sem resposta (tempo configurável)' },
   { value: 'group_daily_summary', label: 'Resumo diário de grupo com IA' },
+  { value: 'external_json', label: 'Dados externos (JSON / n8n)' },
 ];
 
 const ACTION_TYPES: { value: string; label: string; icon: typeof MessageSquare }[] = [
@@ -36,6 +37,8 @@ const ACTION_TYPES: { value: string; label: string; icon: typeof MessageSquare }
 type GroupOption = { id:string; subject:string; jid:string; integration_id:string; conversation_id:string };
 type ChannelOption = { id:string; name:string };
 type ContactOption = {id:string;name:string;phone:string|null};
+type ExternalRun = {id:string;type:string;processed:boolean;error?:string;at:string;details?:{date?:string;due?:number;sent?:number;failed?:number;records?:number}};
+const EXTERNAL_SAMPLE=JSON.stringify({clientes:[{id_externo:'cliente_001',nome:'Maria Silva',telefone:'5511999999999',data_nascimento:'1990-11-13',consentimento_whatsapp:true,filhos:[{id_externo:'filho_1',nome:'Pedro',data_nascimento:'2018-11-13'}],faturas:[{id_externo:'fatura_1',data_renovacao:'2026-11-18'}]}]},null,2);
 export function AutomationsPage() {
   const { currentOrg } = useOrg();
   const { user } = useAuth();
@@ -75,6 +78,15 @@ export function AutomationsPage() {
   const [recipientContact, setRecipientContact] = useState('');
   const [recipientSearch, setRecipientSearch] = useState('');
   const [recipientContacts, setRecipientContacts] = useState<ContactOption[]>([]);
+  const [externalEvent,setExternalEvent]=useState('customer_birthday');
+  const [externalDays,setExternalDays]=useState('5');
+  const [externalTime,setExternalTime]=useState('10:00');
+  const [externalChannel,setExternalChannel]=useState('');
+  const [externalMessage,setExternalMessage]=useState('Olá, {nome}! 🎉 Feliz aniversário!');
+  const [externalSample,setExternalSample]=useState(EXTERNAL_SAMPLE);
+  const [externalPreview,setExternalPreview]=useState('');
+  const [externalRuns,setExternalRuns]=useState<ExternalRun[]>([]);
+  const [externalWorking,setExternalWorking]=useState(false);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -148,6 +160,9 @@ export function AutomationsPage() {
     setSelectedGroup('');setSelectedGroups([]);setWaitingFor('group');setSummaryTimes(['20:00']);
     setRecipientKind('contact');setRecipientGroup('');setRecipientChannel('');
     setRecipientContact('');setRecipientSearch('');setRecipientContacts([]);
+    setExternalEvent('customer_birthday');setExternalDays('5');setExternalTime('10:00');
+    setExternalChannel('');setExternalMessage('Olá, {nome}! 🎉 Feliz aniversário!');
+    setExternalSample(EXTERNAL_SAMPLE);setExternalPreview('');setExternalRuns([]);
     setShowModal(true);
   }
 
@@ -171,6 +186,12 @@ export function AutomationsPage() {
     setRecipientContact(String(trigger?.recipient?.contact_id ?? ''));
     setRecipientSearch('');setRecipientContacts([]);
     setActions((auto.actions as any[] ?? []).filter(a=>a?.type!=='ai_daily_summary'));
+    setExternalEvent(['customer_birthday','child_birthday','invoice_renewal'].includes(trigger?.event_key)?trigger.event_key:'customer_birthday');
+    setExternalDays(String(trigger?.days_before ?? 5));
+    setExternalTime(String(trigger?.send_time || '10:00'));
+    setExternalChannel(String(trigger?.integration_id || ''));
+    setExternalMessage(String(trigger?.message || 'Olá, {nome}! 🎉 Feliz aniversário!'));
+    setExternalSample(EXTERNAL_SAMPLE);setExternalPreview('');setExternalRuns([]);
     setShowModal(true);
   }
 
@@ -198,11 +219,40 @@ export function AutomationsPage() {
     finally {setManuallyRunning(null);}
   }
 
+  async function externalRefresh(id: string) {
+    setExternalWorking(true);
+    try {const result=await apiRequest<{runs:ExternalRun[]}>(`/external-automations/${encodeURIComponent(id)}/runs`);
+      setExternalRuns(result.runs||[]);
+    } catch(error){toastError(error instanceof Error?error.message:'Não foi possível consultar execuções.');}
+    finally {setExternalWorking(false);}
+  }
+  async function externalTestConnection(id: string) {
+    setExternalWorking(true);
+    try {const result=await apiRequest<{count:number;eligible:number}>(`/external-automations/${encodeURIComponent(id)}/test-connection`,{method:'POST'});
+      setExternalPreview(`n8n respondeu: ${result.count} cliente(s), ${result.eligible} evento(s) elegível(is) hoje. Nenhuma mensagem enviada.`);
+      toastSuccess('Consulta testada sem disparos.');
+    } catch(error){toastError(error instanceof Error?error.message:'Falha na consulta ao n8n.');}
+    finally {setExternalWorking(false);}
+  }
+  async function externalValidate(id: string | null) {
+    // A preview requires a saved rule: same schema and checks as the real webhook.
+    if(!id){toastWarning('Salve a automação antes de validar o JSON.');return;}
+    setExternalWorking(true);
+    try {
+      const payload=JSON.parse(externalSample);
+      const response=await apiRequest<{count:number;eligible:number}>(`/external-automations/${encodeURIComponent(id)}/preview`,{method:'POST',body:JSON.stringify(payload)});
+      setExternalPreview(`${response.count} cliente(s) válido(s); ${response.eligible} evento(s) elegível(is) hoje. Nenhuma mensagem enviada.`);
+      toastSuccess('JSON validado. Nenhuma mensagem enviada.');
+    } catch(error) {setExternalPreview('');toastError(error instanceof Error?error.message:'JSON inválido.');}
+    finally{setExternalWorking(false);}
+  }
+
   async function handleSave() {
     if (!orgId || !user || !name.trim()) return;
     const isSummary=triggerType==='group_daily_summary';
+    const isExternal=triggerType==='external_json';
     const isGroup=triggerType==='group_no_reply'||isSummary;
-    if (!isSummary && !actions.length) { toastWarning('Adicione ao menos uma ação.'); return; }
+    if (!isSummary && !isExternal && !actions.length) { toastWarning('Adicione ao menos uma ação.'); return; }
     if (isGroup && (isSummary ? !selectedGroups.length : !selectedGroup)) { toastWarning('Selecione ao menos um grupo que será monitorado.'); return; }
     if (isSummary) {
       if (selectedGroups.length > 1000) {toastWarning('Selecione no máximo 1.000 grupos.');return;}
@@ -213,10 +263,17 @@ export function AutomationsPage() {
         toastWarning('Selecione o grupo ou contato que receberá o resumo.'); return;
       }
     }
+    if(isExternal){
+      if(!['customer_birthday','child_birthday','invoice_renewal'].includes(externalEvent)){toastWarning('Selecione um evento válido.');return;}
+      if(externalEvent==='invoice_renewal'&&(!/^\d+$/.test(externalDays)||Number(externalDays)>365)){toastWarning('Informe antecedência de 0 a 365 dias.');return;}
+      if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(externalTime)){toastWarning('Selecione um horário válido.');return;}
+      if(!channels.some(c=>c.id===externalChannel)){toastWarning('Selecione a instância WhatsApp autorizada.');return;}
+      if(!externalMessage.trim()||externalMessage.length>3000){toastWarning('Informe uma mensagem de até 3.000 caracteres.');return;}
+    }
     if (triggerType === 'keyword' && !triggerKeyword.trim()) { toastWarning('Informe a palavra-chave.'); return; }
     if (triggerType === 'tag_added' && !triggerTag.trim()) { toastWarning('Informe o nome da etiqueta.'); return; }
     if ((triggerType === 'no_response' || triggerType === 'group_no_reply') && !(Number(triggerTimeout) >= 1 && Number(triggerTimeout) <= 10080)) { toastWarning('Informe um tempo entre 1 e 10080 minutos.'); return; }
-    for (const a of (isSummary ? [] : actions)) {
+    for (const a of (isSummary || isExternal ? [] : actions)) {
       if (a.type === 'send_message' && !a.text?.trim() || (a.type === 'add_tag' || a.type === 'replace_tag') && !a.tag?.trim() || a.type === 'replace_tag' && !a.old_tag?.trim() || a.type === 'assign_team' && !a.team?.trim() || a.type === 'call_webhook' && !a.url?.trim()) {
         toastWarning('Preencha todos os dados das ações.'); return;
       }
@@ -234,6 +291,13 @@ export function AutomationsPage() {
         trigger.timeout_minutes=parseInt(triggerTimeout,10);
         trigger.waiting_for=waitingFor;
       }
+      if (isExternal) {
+        trigger.event_key=externalEvent;
+        trigger.days_before=externalEvent==='invoice_renewal'?Number(externalDays):0;
+        trigger.send_time=externalTime;
+        trigger.integration_id=externalChannel;
+        trigger.message=externalMessage.trim();
+      }
       if (isSummary) {
         trigger.times=[...summaryTimes].sort();
         trigger.time=[...summaryTimes].sort()[0]; // compatibilidade com versões anteriores
@@ -246,9 +310,9 @@ export function AutomationsPage() {
         name: name.trim(),
         description: description.trim() || null,
         trigger,
-        actions: (isSummary ? [{type:'ai_daily_summary'}] : actions) as any,
+        actions: (isSummary ? [{type:'ai_daily_summary'}] : isExternal ? [{type:'external_date_delivery'}] : actions) as any,
         created_by: user.id,
-        ...(!editing ? { status: 'paused' } : {}),
+        ...(isExternal || !editing ? { status: 'paused' } : {}),
       };
 
       if (editing) {
@@ -257,11 +321,11 @@ export function AutomationsPage() {
           .update({ ...payload, updated_at: new Date().toISOString() })
           .eq('id', editing.id);
         if (error) throw error;
-        toastSuccess('Automação atualizada');
+        toastSuccess(isExternal?'Automação salva e pausada. Ative somente após o teste do n8n.':'Automação atualizada');
       } else {
         const { error } = await supabase.from('automations').insert(payload);
         if (error) throw error;
-        toastSuccess('Automação criada. Ative-a quando estiver pronta para enviar mensagens.');
+        toastSuccess('Automação criada e pausada. Ative somente após configurar e testar o n8n.');
       }
       setShowModal(false);
       load();
@@ -310,6 +374,7 @@ export function AutomationsPage() {
     if (type === 'keyword') return `${found.label}: "${t.keyword}"`;
     if (type === 'tag_added') return `${found.label}: "${t.tag}"`;
     if (type === 'group_no_reply') return `${found.label} · ${t.timeout_minutes} min · ${t.waiting_for==='group'?'aguardando participantes':'aguardando equipe'} · ${groups.find(g=>g.id===t.group_id)?.subject??'Grupo selecionado'}`;
+    if (type === 'external_json') return `${({customer_birthday:'Aniversário do cliente',child_birthday:'Aniversário do filho',invoice_renewal:'Renovação de fatura'} as Record<string,string>)[t.event_key]||'Dados externos'} · ${t.send_time||'10:00'}${t.event_key==='invoice_renewal'?` · ${t.days_before||0} dias antes`:''}`;
     if (type === 'group_daily_summary') { const ids=Array.isArray(t.group_ids)?t.group_ids:(t.group_id?[t.group_id]:[]);const times=Array.isArray(t.times)&&t.times.length?t.times:[t.time];return `${found.label} · ${times.join(', ')} · ${ids.length} grupo(s)`; }
     return found.label;
   };
@@ -324,7 +389,7 @@ export function AutomationsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Automações</h1>
-          <p className="text-sm text-slate-500 mt-1">{automations.length} automação(ões) · Executor ligado às mensagens recebidas pela Evolution.</p>
+          <p className="text-sm text-slate-500 mt-1">{automations.length} automação(ões) · Mensagens recebidas, agendamentos e consultas externas.</p>
         </div>
         <button onClick={openCreate} className="btn-primary"><Plus size={18} /> Nova automação</button>
       </div>
@@ -360,6 +425,7 @@ export function AutomationsPage() {
                       </span>
                     </div>
                     {auto.description && <p className="text-sm text-slate-500 mt-1">{auto.description}</p>}
+                    {(auto.trigger as any)?.type==='external_json' && <p className="text-xs text-amber-600 mt-1">Consulta n8n programada · validação e controle de duplicidade habilitados</p>}
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span className="badge badge-blue">
                         <Clock size={12} /> {triggerLabel(auto.trigger)}
@@ -455,6 +521,33 @@ export function AutomationsPage() {
                   {TRIGGER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
+              {triggerType==='external_json' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500">O FalaComigo consulta um único workflow do n8n no horário definido, avalia as datas e envia pelo WhatsApp selecionado. A URL e a chave são configuradas uma vez no backend.</p>
+                  <div>
+                    <label className="label">Evento *</label>
+                    <select className="input" value={externalEvent} onChange={e=>setExternalEvent(e.target.value)}>
+                      <option value="customer_birthday">Aniversário do cliente</option>
+                      <option value="child_birthday">Aniversário do filho</option>
+                      <option value="invoice_renewal">Renovação de fatura</option>
+                    </select>
+                  </div>
+                  {externalEvent==='invoice_renewal' && <div>
+                    <label className="label">Dias de antecedência *</label>
+                    <input type="number" min="0" max="365" className="input" value={externalDays} onChange={e=>setExternalDays(e.target.value)}/>
+                  </div>}
+                  <div><label className="label">Horário de execução (São Paulo)</label>
+                    <input type="time" className="input" value={externalTime} onChange={e=>setExternalTime(e.target.value)}/>
+                  </div>
+                  <div>
+                    <label className="label">Instância WhatsApp (para envio futuro) *</label>
+                    <select className="input" value={externalChannel} onChange={e=>setExternalChannel(e.target.value)}>
+                      <option value="">Selecione uma instância...</option>
+                      {channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
               {triggerType === 'group_no_reply' && (
                 <div>
                   <label className="label">Grupo que esta automação vai monitorar *</label>
@@ -557,7 +650,28 @@ export function AutomationsPage() {
             </div>
           </div>
 
-          {triggerType==='group_daily_summary' ? (
+          {triggerType==='external_json' ? (
+            <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200 space-y-3">
+              <h4 className="font-semibold text-slate-900 text-sm">Mensagem WhatsApp</h4>
+              <textarea className="input min-h-[100px]" value={externalMessage} onChange={e=>setExternalMessage(e.target.value)} />
+              <p className="text-xs text-slate-500">Variáveis: {'{nome}'}, {'{nome_filho}'}, {'{data_renovacao}'} e {'{dias_antecedencia}'}. A fonte deve indicar consentimento_whatsapp: true para o destinatário.</p>
+              {editing && (editing.trigger as any)?.type==='external_json' ? (
+                <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                  <h4 className="font-semibold text-sm">Pré-visualizar sem enviar</h4>
+                  <p className="text-xs text-slate-500">Salve as alterações antes de testar. A consulta é iniciada pelo FalaComigo; o n8n apenas retorna os dados.</p>
+                  <button type="button" className="btn-secondary text-xs" disabled={externalWorking} onClick={()=>externalTestConnection(editing.id)}>Testar consulta ao n8n</button>
+                  <label className="label">JSON de teste (validação local)</label>
+                  <textarea value={externalSample} onChange={e=>setExternalSample(e.target.value)} className="input font-mono text-xs min-h-[150px]" spellCheck={false}/>
+                  <div className="flex gap-2 flex-wrap">
+                    <button type="button" className="btn-secondary text-xs" disabled={externalWorking} onClick={()=>externalValidate(editing.id)}>Validar JSON</button>
+                    <button type="button" className="btn-secondary text-xs" disabled={externalWorking} onClick={()=>externalRefresh(editing.id)}>Consultar histórico</button>
+                  </div>
+                  {externalPreview && <p className="text-sm text-green-700">{externalPreview}</p>}
+                  {externalRuns.slice(0,10).map(item=><p key={item.id} className="text-xs text-slate-600">{new Date(item.at).toLocaleString('pt-BR')} · {item.type} · {item.processed?'OK':(item.error||'Pendente/verificar')} {item.details?.sent!==undefined?`· enviados: ${item.details.sent}`:''}</p>)}
+                </div>
+              ) : <p className="text-xs text-slate-500">Depois de salvar, abra Editar para validar o JSON e consultar o n8n. A automação começa pausada.</p>}
+            </div>
+          ) : triggerType==='group_daily_summary' ? (
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200 text-sm text-slate-700">
               <strong>Ação automática:</strong> gerar um resumo por grupo, em cada horário cadastrado, enviando somente ao destinatário escolhido. Nunca mistura os grupos.
             </div>

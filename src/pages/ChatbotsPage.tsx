@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useOrg } from '@/contexts/OrgContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -44,11 +44,16 @@ export function ChatbotsPage() {
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+  const [nodeName, setNodeName] = useState('');
   const [nodeText, setNodeText] = useState('');
+  const dragRef = useRef<{ id: string; startX: number; startY: number; nodeX: number; nodeY: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
   const [nodeOptions, setNodeOptions] = useState('');
   const [nodeField, setNodeField] = useState('');
   const [nodeOperator, setNodeOperator] = useState('equals');
   const [nodeValue, setNodeValue] = useState('');
+  const [conditionLogic, setConditionLogic] = useState<'and' | 'or'>('and');
+  const [conditionRules, setConditionRules] = useState<Array<{field: string;operator:string;value:string}>>([]);
   const [nodeTag, setNodeTag] = useState('');
   const [nodeTeam, setNodeTeam] = useState('');
   const [nodeUrl, setNodeUrl] = useState('');
@@ -102,18 +107,18 @@ export function ChatbotsPage() {
   }
 
   function addNode(type: FlowNode['type']) {
-    const id = `node_${Date.now()}`;
+    const id = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const yPos = nodes.length * 130 + 40;
     const newNode: FlowNode = {
       id,
       type,
-      data: getDefaultNodeData(type),
+      data: { ...getDefaultNodeData(type), label: `${nodeLabel(type)} ${nodes.filter(n => n.type === type).length + 1}` },
       position: { x: 300, y: yPos },
     };
     setNodes(prev => [...prev, newNode]);
     if (nodes.length > 0) {
       const lastNode = nodes[nodes.length - 1];
-      setEdges(prev => [...prev, { from: lastNode.id, to: id }]);
+      if (lastNode.type !== 'condition') setEdges(prev => [...prev, { from: lastNode.id, to: id }]);
     }
     setSelectedNode(newNode);
     selectNode(newNode);
@@ -123,7 +128,7 @@ export function ChatbotsPage() {
     switch (type) {
       case 'message': return { text: 'Nova mensagem' };
       case 'question': return { text: 'Nova pergunta', options: ['Opção 1', 'Opção 2'] };
-      case 'condition': return { field: 'resposta', operator: 'equals', value: '' };
+      case 'condition': return { field: 'resposta', operator: 'equals', value: '', logic: 'and', rules: [{field:'resposta',operator:'equals',value:''}] };
       case 'delay': return { delay: 5, delayUnit: 'minutes' };
       case 'tag': return { tag: 'Nova etiqueta' };
       case 'assign': return { team: 'Suporte' };
@@ -135,7 +140,7 @@ export function ChatbotsPage() {
 
   function updateSelectedNode() {
     if (!selectedNode) return;
-    const updated: FlowNode = { ...selectedNode };
+    const updated: FlowNode = { ...selectedNode, data: { ...selectedNode.data, label: nodeName.trim() } };
     switch (selectedNode.type) {
       case 'message':
       case 'close':
@@ -145,7 +150,7 @@ export function ChatbotsPage() {
         updated.data = { ...updated.data, text: nodeText, options: nodeOptions.split(',').map(o => o.trim()).filter(Boolean) };
         break;
       case 'condition':
-        updated.data = { ...updated.data, field: nodeField, operator: nodeOperator, value: nodeValue };
+        updated.data = { ...updated.data, field: conditionRules[0]?.field ?? nodeField, operator: conditionRules[0]?.operator ?? nodeOperator, value: conditionRules[0]?.value ?? nodeValue, logic: conditionLogic, rules: conditionRules };
         break;
       case 'tag':
         updated.data = { ...updated.data, tag: nodeTag };
@@ -160,8 +165,56 @@ export function ChatbotsPage() {
         updated.data = { ...updated.data, delay: parseInt(nodeDelay) || 5, delayUnit: nodeDelayUnit };
         break;
     }
-    setNodes(prev => prev.map(n => n.id === selectedNode.id ? updated : n));
-    setSelectedNode(updated);
+    setNodes(prev => prev.map(n => n.id === selectedNode.id ? { ...n, data: updated.data } : n));
+    setSelectedNode(prev => prev ? { ...prev, data: updated.data } : prev);
+  }
+
+  function changeConnection(from: string, label: string | undefined, to: string) {
+    setEdges(prev => {
+      const keep = prev.filter(e => !(e.from === from && ((e.label ?? '') === (label ?? '') || (label === 'yes' && !e.label))));
+      return to ? [...keep, {from, to, ...(label ? {label} : {})}] : keep;
+    });
+  }
+
+  function connectionTarget(from: string, label?: string) {
+    return edges.find(e => e.from === from && (e.label ?? '') === (label ?? ''))?.to ?? (label === 'yes' ? edges.find(e => e.from === from && !e.label)?.to ?? '' : '');
+  }
+
+  // Drag changes only the canvas coordinates; the stable node IDs and edges are unaffected.
+  function startNodeDrag(event: React.PointerEvent<HTMLDivElement>, node: FlowNode) {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    selectNode(node);
+    dragRef.current = { id: node.id, startX: event.clientX, startY: event.clientY, nodeX: node.position.x, nodeY: node.position.y, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveNodeDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    drag.moved = true;
+    const nextX = Math.max(16, Math.round((drag.nodeX + dx) / 10) * 10);
+    const nextY = Math.max(16, Math.round((drag.nodeY + dy) / 10) * 10);
+    setNodes(prev => prev.map(n => n.id === drag.id ? { ...n, position: { x: nextX, y: nextY } } : n));
+  }
+
+  function finishNodeDrag() {
+    if (dragRef.current?.moved) {
+      suppressClickRef.current = true;
+    }
+    dragRef.current = null;
+  }
+
+  function displayNodeName(node: FlowNode) {
+    return node.data.label?.trim() || (node.type === 'start' ? 'Início do fluxo' : nodeLabel(node.type));
+  }
+
+  function displayNodeOption(node: FlowNode) {
+    const name = displayNodeName(node);
+    return `${name} · ${nodeLabel(node.type)}`;
   }
 
   function deleteNode(nodeId: string) {
@@ -173,11 +226,14 @@ export function ChatbotsPage() {
 
   function selectNode(node: FlowNode) {
     setSelectedNode(node);
+    setNodeName(node.data.label ?? (node.type === 'start' ? 'Início' : nodeLabel(node.type)));
     setNodeText(node.data.text ?? '');
     setNodeOptions(node.data.options?.join(', ') ?? '');
     setNodeField(node.data.field ?? '');
     setNodeOperator(node.data.operator ?? 'equals');
     setNodeValue(node.data.value ?? '');
+    setConditionLogic(node.data.logic ?? 'and');
+    setConditionRules(node.data.rules?.length ? node.data.rules.map(r => ({...r})) : [{field:node.data.field ?? 'resposta',operator:node.data.operator ?? 'equals',value:node.data.value ?? ''}]);
     setNodeTag(node.data.tag ?? '');
     setNodeTeam(node.data.team ?? '');
     setNodeUrl(node.data.url ?? '');
@@ -347,16 +403,16 @@ export function ChatbotsPage() {
             backgroundImage: 'radial-gradient(circle, rgb(var(--ui-slate-300)) 1px, transparent 1px)',
             backgroundSize: '20px 20px',
           }}>
-            <div className="relative" style={{ minWidth: '800px', minHeight: '600px' }}>
+            <div className="relative" style={{ minWidth: Math.max(800, ...nodes.map(n => n.position.x + 300)), minHeight: Math.max(600, ...nodes.map(n => n.position.y + 180)) }}>
               {/* Edges */}
               <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }}>
                 {edges.map((edge, i) => {
                   const from = nodes.find(n => n.id === edge.from);
                   const to = nodes.find(n => n.id === edge.to);
                   if (!from || !to) return null;
-                  const x1 = from.position.x + 130;
+                  const x1 = from.position.x + 120;
                   const y1 = from.position.y + 30;
-                  const x2 = to.position.x + 130;
+                  const x2 = to.position.x + 120;
                   const y2 = to.position.y + 30;
                   const midY = (y1 + y2) / 2;
                   return (
@@ -368,6 +424,7 @@ export function ChatbotsPage() {
                         strokeWidth="2"
                         markerEnd="url(#arrowhead)"
                       />
+                      {edge.label && <text x={(x1 + x2) / 2} y={midY - 5} fill="currentColor" fontSize="11">{edge.label === 'yes' ? 'SIM' : edge.label === 'no' ? 'NÃO' : edge.label}</text>}
                     </g>
                   );
                 })}
@@ -385,17 +442,25 @@ export function ChatbotsPage() {
                 return (
                   <div
                     key={node.id}
-                    onClick={() => selectNode(node)}
+                    onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } selectNode(node); }}
                     className={`absolute w-60 rounded-xl bg-white shadow-md ring-1 cursor-pointer transition-all hover:shadow-lg ${
                       isActive ? 'ring-2 ring-blue-400' : 'ring-slate-200'
                     }`}
                     style={{ left: node.position.x, top: node.position.y }}
                   >
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-t-xl ring-1 ring-inset ${nodeColor(node.type)}`}>
+                    <div
+                      onPointerDown={e => startNodeDrag(e, node)}
+                      onPointerMove={moveNodeDrag}
+                      onPointerUp={finishNodeDrag}
+                      onPointerCancel={finishNodeDrag}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-t-xl ring-1 ring-inset cursor-grab active:cursor-grabbing select-none touch-none ${nodeColor(node.type)}`}
+                      title="Arraste pelo cabeçalho para organizar o fluxo"
+                    >
                       <Icon size={14} />
-                      <span className="text-xs font-semibold">{nodeLabel(node.type)}</span>
+                      <span className="text-xs font-semibold truncate" title={displayNodeName(node)}>{displayNodeName(node)}</span>
                       {node.id !== 'start' && (
                         <button
+                          onPointerDown={e => e.stopPropagation()}
                           onClick={(e) => { e.stopPropagation(); deleteNode(node.id); }}
                           className="ml-auto text-slate-400 hover:text-red-500"
                         >
@@ -404,6 +469,7 @@ export function ChatbotsPage() {
                       )}
                     </div>
                     <div className="px-3 py-2.5">
+                      <p className="text-[11px] text-slate-500 mb-1">{nodeLabel(node.type)}</p>
                       <p className="text-sm text-slate-700 line-clamp-2">
                         {node.data.text || node.data.value || node.data.tag || node.data.team || node.data.url || `${node.data.delay || ''} ${node.data.delayUnit || ''}`}
                       </p>
@@ -424,8 +490,14 @@ export function ChatbotsPage() {
           {/* Node editor panel */}
           {selectedNode && selectedNode.type !== 'start' && (
             <div className="w-72 border-l border-slate-200 bg-white p-4 overflow-y-auto">
-              <h3 className="font-semibold text-slate-900 mb-4">Editar nó: {nodeLabel(selectedNode.type)}</h3>
+              <h3 className="font-semibold text-slate-900 mb-1">Editar nó</h3>
+              <p className="text-xs text-slate-500 mb-4">{nodeLabel(selectedNode.type)} · Arraste pelo cabeçalho para organizar</p>
               <div className="space-y-3">
+                <div>
+                  <label className="label">Nome do nó (identificação no fluxo)</label>
+                  <input className="input" value={nodeName} onChange={e => setNodeName(e.target.value)} placeholder="Ex.: Cliente escolheu Rolex" maxLength={80} />
+                  <p className="text-xs text-slate-500 mt-1">Este nome aparece no cartão e nos seletores de conexão.</p>
+                </div>
                 {(selectedNode.type === 'message' || selectedNode.type === 'close') && (
                   <div>
                     <label className="label">Texto da mensagem</label>
@@ -463,23 +535,63 @@ export function ChatbotsPage() {
                 {selectedNode.type === 'condition' && (
                   <>
                     <div>
-                      <label className="label">Campo</label>
-                      <input type="text" value={nodeField} onChange={(e) => setNodeField(e.target.value)} className="input" />
-                    </div>
-                    <div>
-                      <label className="label">Operador</label>
-                      <select value={nodeOperator} onChange={(e) => setNodeOperator(e.target.value)} className="input">
-                        <option value="equals">Igual a</option>
-                        <option value="contains">Contém</option>
-                        <option value="not_equals">Diferente de</option>
+                      <label className="label">Combinação das regras</label>
+                      <select className="input" value={conditionLogic} onChange={e => setConditionLogic(e.target.value as 'and'|'or')}>
+                        <option value="and">Todas devem ser verdadeiras (E)</option>
+                        <option value="or">Pelo menos uma verdadeira (OU)</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="label">Valor</label>
-                      <input type="text" value={nodeValue} onChange={(e) => setNodeValue(e.target.value)} className="input" />
-                    </div>
+                    {conditionRules.map((rule, index) => (
+                      <div key={index} className="p-2 border rounded-lg space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium">Regra {index + 1}</span>
+                          {conditionRules.length > 1 && <button className="text-xs text-red-600" onClick={() => setConditionRules(prev => prev.filter((_, i) => i !== index))}>Excluir</button>}
+                        </div>
+                        <label className="label">Campo</label>
+                        <select className="input" value={rule.field} onChange={e => setConditionRules(prev => prev.map((r,i) => i === index ? {...r,field:e.target.value}:r))}>
+                          <option value="resposta">Resposta / mensagem</option>
+                          <option value="nome">Nome do contato</option>
+                          <option value="telefone">Telefone</option>
+                          <option value="email">E-mail</option>
+                          <option value="status">Status da conversa</option>
+                        </select>
+                        <label className="label">Comparação</label>
+                        <select className="input" value={rule.operator} onChange={e => setConditionRules(prev => prev.map((r,i) => i === index ? {...r,operator:e.target.value}:r))}>
+                          <option value="equals">É igual a</option>
+                          <option value="not_equals">É diferente de</option>
+                          <option value="contains">Contém</option>
+                          <option value="not_contains">Não contém</option>
+                          <option value="starts_with">Começa com</option>
+                          <option value="ends_with">Termina com</option>
+                          <option value="is_empty">Está vazio</option>
+                          <option value="not_empty">Não está vazio</option>
+                          <option value="greater_than">Maior que (número)</option>
+                          <option value="less_than">Menor que (número)</option>
+                        </select>
+                        {!['is_empty','not_empty'].includes(rule.operator) && <>
+                          <label className="label">Valor</label>
+                          <input className="input" value={rule.value} onChange={e => setConditionRules(prev => prev.map((r,i) => i === index ? {...r,value:e.target.value}:r))}/>
+                        </>}
+                      </div>
+                    ))}
+                    <button className="btn-ghost w-full text-xs" onClick={() => setConditionRules(prev => [...prev,{field:'resposta',operator:'equals',value:''}])}>+ Adicionar condição</button>
                   </>
                 )}
+                <div className="border-t pt-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">Próximos passos</p>
+                  {(selectedNode.type === 'condition' ? [
+                    {label: 'yes', title: 'Se SIM'}, {label: 'no', title: 'Se NÃO'}
+                  ] : [{label: '', title: 'Continuar para'}]).map(branch => (
+                    <div key={branch.label}>
+                      <label className="label">{branch.title}</label>
+                      <select className="input" value={connectionTarget(selectedNode.id, branch.label || undefined)} onChange={e => changeConnection(selectedNode.id, branch.label || undefined, e.target.value)}>
+                        <option value="">Encerrar este caminho</option>
+                        {nodes.filter(n => n.id !== selectedNode.id && n.type !== 'start').map(n => <option key={n.id} value={n.id}>{displayNodeOption(n)}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                  <p className="text-xs text-slate-500">As conexões são salvas junto com o chatbot. Em condições, configure SIM e NÃO separadamente.</p>
+                </div>
                 {selectedNode.type === 'tag' && (
                   <div>
                     <label className="label">Etiqueta</label>

@@ -148,9 +148,12 @@ export interface FlowNode {
   id: string;
   type: 'message' | 'question' | 'condition' | 'delay' | 'tag' | 'assign' | 'webhook' | 'close' | 'start';
   data: {
+    label?: string;
     text?: string;
     options?: string[];
     field?: string;
+    logic?: 'and' | 'or';
+    rules?: Array<{ field: string; operator: string; value: string }>;
     operator?: string;
     value?: string;
     tag?: string;

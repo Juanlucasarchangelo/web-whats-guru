@@ -15,6 +15,7 @@ import { errorHandler, wrap } from './http.js';
 import { evolutionWebhookRouter } from './routes/evolution-webhook.js';
 import { operationsRouter } from './routes/operations.js';
 import { groupAutomationsRouter } from './routes/group-automations.js';
+import { externalAutomationsAdminRouter } from './routes/external-automations.js';
 import { profileRouter } from './routes/profile.js';
 import { reportsRouter } from './routes/reports.js';
 import { accessRouter } from './routes/access.js';
@@ -89,6 +90,7 @@ export function createApp(config) {
     secure.use('/stalker', requirePermission('page.instagramCrm'), stalkerRouter());
     secure.use('/operations', guardOperations, operationsRouter());
     secure.use('/group-automations', requirePermission('page.automations'), groupAutomationsRouter());
+    secure.use('/external-automations', requirePermission('page.automations'), externalAutomationsAdminRouter());
     secure.use('/profile', requirePermission('page.profile'), profileRouter());
     secure.use('/reports', requirePermission('page.reports'), reportsRouter());
     secure.use('/technical-documents', technicalDocumentsRouter());

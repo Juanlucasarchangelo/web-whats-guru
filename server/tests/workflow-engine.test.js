@@ -28,7 +28,7 @@ function harness(automations = [], bots = []) {
     },
     message: { update: async data => { updated.push(data); } },
   };
-  const sandbox = { prisma, randomUUID, sendEvolutionText: async ({ text }) => { sent.push(text); return { id: String(sent.length) }; },
+  const sandbox = { prisma, randomUUID, externalAutomationTick: async () => {}, sendEvolutionText: async ({ text }) => { sent.push(text); return { id: String(sent.length) }; },
     console, Date, Intl, process: { env: {} }, fetch, AbortSignal, URL, Map, Promise, Number, String, Object, Math, Array, Error, Boolean, RegExp };
   createContext(sandbox);
   runInContext(source + '\nthis.workflows = { matchesKeyword, outsideHours, processIncomingWorkflows };', sandbox);
@@ -66,10 +66,10 @@ test('multi-step chatbot asks question and resumes after answer', async () => {
   const w=harness([], [bot]);
   await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'iniciar',isNew:false,messageId:'msg1'});
   assert.deepEqual(w.sent,['Olá Maria','Escolha:\n1. Vendas\n2. Suporte']);
-  assert.equal(w.contact.custom_fields._whats_guru_chatbot_v1.waiting_for,'n2');
+  assert.equal(w.contact.custom_fields._whats_guru_chatbot_v1_conversation1.waiting_for,'n2');
   await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'2',isNew:false,messageId:'msg2'});
   assert.equal(w.sent[2],'Sua escolha: Suporte');
-  assert.equal(w.contact.custom_fields._whats_guru_chatbot_v1,undefined);
+  assert.equal(w.contact.custom_fields._whats_guru_chatbot_v1_conversation1,undefined);
 });
 test('new conversation trigger does not fire on ordinary replies', async () => {
   const auto = [{id:'autoNew',status:'active',trigger:{type:'new_conversation'},actions:[{type:'send_message',text:'Bem-vindo!'}]}];
@@ -99,4 +99,19 @@ test('unconfigured rule does not fake a successful send', async () => {
   await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'ajuda',isNew:false,messageId:'m1'});
   assert.equal(w.sent.length,0);
   assert.ok(w.logs.find(log=>log.event_type==='automation:autoBad:m1' && !log.processed));
+});
+
+test('condition branches to yes and no without sending message on the wrong path', async () => {
+  const bot={id:'branch',status:'active',trigger_keyword:'começar',trigger_channel:'whatsapp',flow:{nodes:[
+    {id:'start',type:'start',data:{}},{id:'question',type:'question',data:{text:'Interesse?',options:[]}},
+    {id:'condition',type:'condition',data:{rules:[{field:'resposta',operator:'contains',value:'preço'},{field:'nome',operator:'equals',value:'Maria'}],logic:'and'}},
+    {id:'yes',type:'message',data:{text:'Vou enviar valores'}},{id:'no',type:'message',data:{text:'Vou pedir mais detalhes'}}
+  ],edges:[{from:'start',to:'question'},{from:'question',to:'condition'},{from:'condition',to:'yes',label:'yes'},{from:'condition',to:'no',label:'no'}]}};
+  const w=harness([], [bot]);
+  await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'começar',isNew:false,messageId:'m1'});
+  await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'Quero PREÇO',isNew:false,messageId:'m2'});
+  assert.deepEqual(w.sent,['Interesse?','Vou enviar valores']);
+  await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'começar',isNew:false,messageId:'m3'});
+  await w.processIncomingWorkflows({orgId:'org1',conversationId:'conversation1',text:'Preciso de suporte',isNew:false,messageId:'m4'});
+  assert.equal(w.sent[3],'Vou pedir mais detalhes');
 });

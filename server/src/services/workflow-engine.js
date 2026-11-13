@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
 import { sendEvolutionText } from './evolution.js';
+import { externalAutomationTick } from './external-date-engine.js';
 
 const SESSION_KEY = '_whats_guru_chatbot_v1';
 const MAX_STEPS = 18;
@@ -186,19 +187,42 @@ async function runMatching(ctx, { triggerType, text = '', tag: addedTag = '', is
     }
   }
 }
-function nextNode(flow, from) {
-  const edge = (flow.edges || []).find(e => e.from === from);
+function nextNode(flow, from, branch = null) {
+  const outgoing = (flow.edges || []).filter(e => e.from === from);
+  // Existing flows use unlabeled linear edges. Branching flows use yes/no labels.
+  const edge = branch == null ? outgoing.find(e => !e.label) ?? outgoing[0]
+    : outgoing.find(e => e.label === branch) ?? (branch === 'yes' ? outgoing.find(e => !e.label) : null);
   return (flow.nodes || []).find(n => n.id === edge?.to);
 }
 function conditionValue(ctx, field, answer) {
-  const values = { resposta: answer, answer, nome: ctx.contact.name, telefone: ctx.contact.phone };
-  return norm(values[norm(field)] ?? '');
+  const selected = norm(field);
+  const values = { resposta: answer, answer, nome: ctx.contact.name, telefone: ctx.contact.phone,
+    mensagem: answer, email: ctx.contact.email, status: ctx.conversation.status };
+  if (selected === 'etiquetas') return (ctx.contact.tag_names || []).join(', ');
+  return String(values[selected] ?? ctx.contact.custom_fields?.[field] ?? '');
+}
+function evaluateRule(ctx, rule, answer) {
+  const leftRaw = conditionValue(ctx, rule.field, answer);
+  const rightRaw = String(rule.value ?? '');
+  const left = norm(leftRaw), right = norm(rightRaw);
+  switch (rule.operator) {
+    case 'not_equals': return left !== right;
+    case 'contains': return Boolean(right) && left.includes(right);
+    case 'not_contains': return Boolean(right) && !left.includes(right);
+    case 'starts_with': return Boolean(right) && left.startsWith(right);
+    case 'ends_with': return Boolean(right) && left.endsWith(right);
+    case 'is_empty': return !left;
+    case 'not_empty': return Boolean(left);
+    case 'greater_than': return leftRaw.trim() !== '' && Number.isFinite(Number(leftRaw)) && Number(leftRaw) > Number(rightRaw);
+    case 'less_than': return leftRaw.trim() !== '' && Number.isFinite(Number(leftRaw)) && Number(leftRaw) < Number(rightRaw);
+    default: return left === right;
+  }
 }
 function meetsCondition(ctx, node, answer) {
-  const left = conditionValue(ctx, node.data?.field, answer); const right = norm(node.data?.value);
-  if (node.data?.operator === 'not_equals') return left !== right;
-  if (node.data?.operator === 'contains') return Boolean(right) && left.includes(right);
-  return left === right;
+  const rules = Array.isArray(node.data?.rules) && node.data.rules.length ? node.data.rules :
+    [{ field: node.data?.field, operator: node.data?.operator, value: node.data?.value }];
+  return node.data?.logic === 'or' ? rules.some(r => evaluateRule(ctx, r, answer))
+    : rules.every(r => evaluateRule(ctx, r, answer));
 }
 async function executeFlow(ctx, bot, fromId, answer = '') {
   const flow = bot.flow && typeof bot.flow === 'object' ? bot.flow : {};
@@ -211,8 +235,9 @@ async function executeFlow(ctx, bot, fromId, answer = '') {
       await send(ctx, `${data.text || 'Escolha uma opcao:'}${opts.length ? '\n' + opts.map((s, index) => `${index + 1}. ${s}`).join('\n') : ''}`, answer);
       await saveSession(ctx, { conversation_id: ctx.conversation.id, bot_id: bot.id, waiting_for: node.id, updated_at: new Date().toISOString() });
       return;
-    } else if (node.type === 'condition' && !meetsCondition(ctx, node, answer)) {
-      await saveSession(ctx, null); return;
+    } else if (node.type === 'condition') {
+      current = nextNode(flow, node.id, meetsCondition(ctx, node, answer) ? 'yes' : 'no');
+      continue;
     } else if (node.type === 'tag') await tag(ctx, data.tag);
     else if (node.type === 'assign') await assign(ctx, data.team);
     else if (node.type === 'webhook') await webhook(ctx, data.url, answer);
@@ -340,6 +365,7 @@ export async function workflowTick() {
         }
       }
     }
+    await externalAutomationTick().catch(error => console.error('[Automação datas] Falha:', error.message));
   } finally { runningTick = false; }
 }
 

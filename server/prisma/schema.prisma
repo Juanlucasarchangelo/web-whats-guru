@@ -76,6 +76,7 @@ model Organization {
   webhook_events          WebhookEvent[]
   whatsapp_groups         WhatsAppGroup[]
   group_automation_runs   GroupAutomationExecution[]
+  external_automation_records ExternalAutomationRecord[]
 
   @@index([region], map: "idx_organizations_region")
   @@map("organizations")
@@ -374,12 +375,32 @@ model Automation {
   created_at    DateTime     @default(now())
   updated_at    DateTime     @default(now()) @updatedAt
   group_automation_runs GroupAutomationExecution[]
+  external_automation_records ExternalAutomationRecord[]
   users         User?         @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_automations_creator")
   organizations Organization @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_automations_org")
 
   @@index([org_id], map: "idx_automations_org")
   @@index([created_by], map: "idx_automations_creator")
   @@map("automations")
+}
+
+// External JSON records, scoped to one automation; updates never erase other organizations.
+model ExternalAutomationRecord {
+  id            String    @id @default(uuid()) @db.Char(36)
+  org_id        String    @db.Char(36)
+  automation_id String    @db.Char(36)
+  external_id   String    @db.VarChar(128)
+  display_name  String    @db.VarChar(160)
+  phone         String    @db.VarChar(20)
+  event_date    String?   @db.VarChar(10)
+  payload       Json
+  synced_at     DateTime  @default(now())
+  automation    Automation    @relation(fields: [automation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_external_record_automation")
+  organization  Organization  @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_external_record_org")
+
+  @@unique([automation_id, external_id], map: "uq_external_record_source")
+  @@index([org_id, automation_id, event_date], map: "idx_external_record_due")
+  @@map("external_automation_records")
 }
 
 // One execution per group rule and message/day; protects against repeated scheduler ticks.
